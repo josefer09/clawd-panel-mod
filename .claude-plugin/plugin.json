@@ -1,0 +1,55 @@
+{
+  "name": "clawd-panel",
+  "version": "0.0.0",
+  "description": "A right-side HUD pane for Claude Code: usage, context breakdown, subagents, git and a pixel-art avatar.",
+  "author": {
+    "name": "josefer09"
+  },
+  "homepage": "https://github.com/josefer09/clawd-panel-mod",
+  "repository": "https://github.com/josefer09/clawd-panel-mod",
+  "license": "MIT",
+  "keywords": [
+    "mod",
+    "hud",
+    "pane",
+    "usage",
+    "context",
+    "subagents",
+    "git"
+  ],
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "title": {
+      "type": "string",
+      "title": "HUD title",
+      "description": "The name drawn at the top of the pane.",
+      "default": "Claude HUD"
+    },
+    "theme": {
+      "type": "string",
+      "title": "Theme",
+      "description": "pyra draws the dark board of the design; pyra-light suits a light terminal.",
+      "default": "pyra",
+      "options": [
+        "pyra",
+        "pyra-light"
+      ]
+    },
+    "alertThreshold": {
+      "type": "number",
+      "title": "Context alert threshold (%)",
+      "description": "At or above this context fill the meters turn inverse red and a toast shows once per crossing.",
+      "default": 90,
+      "min": 50,
+      "max": 100
+    },
+    "dockColumns": {
+      "type": "number",
+      "title": "Docked pane width",
+      "description": "Columns the pane asks for when docked beside the transcript.",
+      "default": 56,
+      "min": 40,
+      "max": 120
+    }
+  }
+}
