@@ -204,6 +204,7 @@ export const PEEK = {
         if (e.args === 'avatar') return { text: JSON.stringify((await $.state.get({ plugin: 'clawd-panel', key: 'avatar' })).value ?? null) }
         if (e.args === 'avatarState') return { text: JSON.stringify((await $.state.get({ plugin: 'clawd-panel', key: 'avatarState' })).value ?? null) }
         if (e.args === 'avatarFrames') return { text: JSON.stringify((await $.state.get({ plugin: 'clawd-panel', key: 'avatarFrames' })).value ?? null) }
+        if (e.args === 'previewing') return { text: JSON.stringify((await $.state.get({ plugin: 'clawd-panel', key: 'previewing' })).value ?? null) }
         if (e.args === 'avatarNote') return { text: JSON.stringify((await $.state.get({ plugin: 'clawd-panel', key: 'avatarNote' })).value ?? null) }
         if (e.args === 'lifetimeTurns') return { text: JSON.stringify((await $.state.get({ plugin: 'clawd-panel', key: 'lifetimeTurns' })).value ?? null) }
         if (e.args === 'terminal') return { text: JSON.stringify((await $.state.get({ plugin: 'clawd-panel', key: 'terminal' })).value ?? null) }

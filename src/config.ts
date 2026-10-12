@@ -15,7 +15,7 @@ export type Config = {
   dockColumns: number
 }
 
-export const VERSION = '0.5.0'
+export const VERSION = '0.6.0'
 
 let current: Config = { title: 'Claude HUD', theme: 'pyra', alertThreshold: 90, dockColumns: 56 }
 

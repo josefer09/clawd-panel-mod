@@ -9,6 +9,7 @@ import {
   onCommand,
   onCompact,
   onMeasure,
+  onPaneClose,
   onSessionStart,
   onSessionStartClassic,
   onSpawn,
@@ -31,5 +32,6 @@ export const register: Register = (on, options) => {
   on('tool.call', onToolCall).catch(($, e, next) => next(e))
   on('agent.spawn', onSpawn).catch(($, e, next) => next(e))
   on('command.run', { command: ['clawd', 'clawd-band'] }, onCommand)
+  on('ui.close', onPaneClose).catch(($, e, next) => next(e))
   on('ui.render', { component: 'Pane', requestId: 'clawd' }, drawPane)
 }

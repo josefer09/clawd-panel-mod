@@ -4,9 +4,10 @@
 // and what to draw in src/render (pure).
 
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, HookOf, RenderElement, RenderInput, RenderSurface, Timer } from 'claude-code'
+import type { EngineInterface, HookOf, ImageSource, RenderElement, RenderInput, RenderSurface, Timer } from 'claude-code'
 
-import type { AvatarState, GitSnap, RenderMode, SessionSnap, TabId } from '../types'
+import type { AvatarConfig, AvatarState, GitSnap, RenderMode, SessionSnap, TabId } from '../types'
+import { baseName, expandPath, framesOf, halve, single, sliceSheet } from './collectors/avatar'
 import { completed, isActive, listed, located, LOCATION_ARGV, parseLocation, spawned, stepped } from './collectors/agents'
 import { GRID_COLUMNS, reduceBreakdown } from './collectors/context'
 import { FILE_TOOLS, fileOf, markFile } from './collectors/files'
@@ -17,12 +18,16 @@ import type { TerminalEnv } from './collectors/terminal'
 import { config, VERSION } from './config'
 import { bodyWidth, pane, placeholder } from './render/draw'
 import { isTab } from './render/pane'
-import { picture } from './render/avatar'
+import { imageSourceOf, picture, rasterCells } from './render/avatar'
 import type { Drawn } from './render/avatar'
-import { framePixels, levelOf } from './render/avatarFrames'
-import { scale2 } from './render/raster/cells'
-import { emptyStateSprite, STATE_TEXT } from './render/raster/sprite'
+import { frameCount, framePixels, levelOf } from './render/avatarFrames'
+import { scale2, unbase64 } from './render/raster/cells'
+import type { Pixels } from './render/raster/cells'
+import { decodePng } from './render/raster/png'
+import { emptyStateSprite, FPS, FRAMES, mini, sprite, STATE_TEXT, STATES } from './render/raster/sprite'
 import { agentsTab } from './render/tabs/agents'
+import { avatarTab } from './render/tabs/avatar'
+import type { AvatarData } from './render/tabs/avatar'
 import type { AgentsData } from './render/tabs/agents'
 import { context } from './render/tabs/context'
 import { gitTab } from './render/tabs/git'
@@ -58,6 +63,7 @@ const avatar = atom({ plugin: 'clawd-panel', key: 'avatar' } as const, DEFAULT_A
 const avatarState = atom({ plugin: 'clawd-panel', key: 'avatarState' } as const, 'idle')
 const avatarFrames = atom({ plugin: 'clawd-panel', key: 'avatarFrames' } as const, null)
 const avatarNote = atom({ plugin: 'clawd-panel', key: 'avatarNote' } as const, '')
+const previewing = atom({ plugin: 'clawd-panel', key: 'previewing' } as const, false)
 const lifetimeTurns = atom({ plugin: 'clawd-panel', key: 'lifetimeTurns' } as const, 0)
 const terminal = atom({ plugin: 'clawd-panel', key: 'terminal' } as const, '')
 
@@ -238,7 +244,99 @@ async function readAll($: EngineInterface): Promise<void> {
   await update($, cost, ledger => baselineCost(ledger, u?.costUsd))
   await refreshAgents($)
   await detectTerminalOf($)
+  await loadAvatar($)
   refreshGitSoon($)
+  if ((await $.ui.panes()).some(p => p.id === PANE)) startAnimator($)
+}
+
+/** Reads and decodes the configured sprite or sheet into frames; a failure leaves the built-in Clawd and says why. */
+async function loadAvatar($: EngineInterface): Promise<void> {
+  const c = await read($, avatar)
+  const path = c.sheetPath || c.spritePath
+  if (path === '') {
+    await update($, avatarFrames, () => null)
+    return
+  }
+  const s = await read($, session)
+  const full = expandPath(path, s.home)
+  try {
+    const file = await $.fs.read(full, { as: 'bytes' })
+    const px = decodePng(unbase64(file.base64))
+    const frames = c.sheetPath ? sliceSheet(px, c.framesPerRow) : single(px)
+    const loaded = framesOf(full, frames)
+    await update($, avatarFrames, () => loaded)
+    const count = STATES.map(st => frames[st].length).join('/')
+    await update($, avatarNote, () => `Loaded ${baseName(full)}: ${loaded.width}×${loaded.height} px, frames ${count}.`)
+  } catch (error) {
+    await update($, avatarFrames, () => null)
+    await update($, avatarNote, () => `Could not load ${baseName(full)}: ${error instanceof Error ? error.message : String(error)}. Showing Clawd.`)
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Animation: `$.ui.blit` repaints the keyed avatar pictures in place, at the
+// sprite frame rate, while the pane is open. Nothing is drawn again.
+
+let animTimer: Timer | undefined
+let animFrame = 0
+/** Which keyed pictures the last drawing mounted on the terminal, by key. */
+let animTargets: Record<string, Drawn> = {}
+const frameCache = new Map<string, { cells: string } | { source: ImageSource }>()
+
+function startAnimator($: EngineInterface): void {
+  if (animTimer !== undefined) return
+  animTimer = $.clock.every(Math.round(1000 / FPS), () => {
+    void animate($)
+  })
+}
+
+function stopAnimator(): void {
+  animTimer?.cancel()
+  animTimer = undefined
+  animTargets = {}
+}
+
+async function animate($: EngineInterface): Promise<void> {
+  const keys = Object.keys(animTargets)
+  if (keys.length === 0) return
+  animFrame += 1
+  if (animFrame % (FPS * 5) === 0 && !(await $.ui.panes()).some(p => p.id === PANE)) {
+    stopAnimator()
+    return
+  }
+  const custom = await read($, avatarFrames)
+  const state = await read($, avatarState)
+  const isPreviewing = await read($, previewing)
+  const pal = paletteOf(config().theme).sprite
+  for (const key of keys) {
+    const drawn = animTargets[key]
+    if (drawn === undefined) continue
+    let st = state
+    let frame = animFrame
+    if (key === 'avatar-preview' && isPreviewing) {
+      const per = FRAMES * 2
+      st = STATES[Math.floor(animFrame / per) % STATES.length] ?? state
+      frame = animFrame % per
+    }
+    const count = frameCount(custom, st)
+    if (count < 2 && !(key === 'avatar-preview' && isPreviewing)) continue
+    const f = ((frame % count) + count) % count
+    const cacheKey = `${key}:${drawn}:${st}:${f}:${custom?.source ?? 'clawd'}:${config().theme}`
+    let made = frameCache.get(cacheKey)
+    if (made === undefined) {
+      const px = framePixels(custom, st, f, pal)
+      made = drawn === 'image' ? { source: imageSourceOf(px) } : { cells: rasterCells(px).cells }
+      if (frameCache.size > 64) frameCache.clear()
+      frameCache.set(cacheKey, made)
+    }
+    const r = 'source' in made ? await $.ui.blit({ requestId: PANE, key, source: made.source }) : await $.ui.blit({ requestId: PANE, key, cells: made.cells })
+    if (r.deny !== undefined) delete animTargets[key]
+  }
+}
+
+export const onPaneClose: HookOf<'ui.close'> = async ($, e, next) => {
+  if (e.id === PANE) stopAnimator()
+  return next(e)
 }
 
 let ticker: Timer | undefined
@@ -413,6 +511,7 @@ export const onCommand: HookOf<'command.run'> = async ($, e) => {
   }
   const c = config()
   await $.ui.open({ id: PANE, title: c.title, focus: true, closeOnEscape: true, columns: c.dockColumns })
+  startAnimator($)
   return {}
 }
 
@@ -430,13 +529,17 @@ function drawnAs(mode: RenderMode, term: string, surface: RenderSurface): Drawn 
 
 /** Clawd's picture for the current state, as `key`: the built-in sprite or the person's own frames. */
 async function avatarPicture($: EngineInterface, ctx: Ctx, key: string, override?: { state: AvatarState; frame: number }): Promise<RenderElement> {
-  const config = await read($, avatar)
+  const cfg = await read($, avatar)
   const term = await read($, terminal)
   const state = override?.state ?? (await read($, avatarState))
   const frame = override?.frame ?? 0
   const custom = await read($, avatarFrames)
   const px = framePixels(custom, state, frame, ctx.pal.sprite)
-  return picture(ctx, key, px, drawnAs(config.mode, term, ctx.surface), `Clawd · ${STATE_TEXT[state]}`)
+  const drawn = drawnAs(cfg.mode, term, ctx.surface)
+  if (ctx.surface === 'terminal') animTargets[key] = drawn
+  const isSingle = cfg.spritePath !== '' && cfg.sheetPath === '' && custom !== null
+  const source: ImageSource | undefined = isSingle && drawn === 'image' ? { file: custom.source, format: 'png' } : undefined
+  return picture(ctx, key, px, drawn, `Clawd · ${STATE_TEXT[state]}`, source)
 }
 
 async function homeData($: EngineInterface, ctx: Ctx, s: SessionSnap): Promise<HomeData> {
@@ -498,7 +601,7 @@ async function contextData($: EngineInterface, s: SessionSnap): Promise<ContextD
 
 async function agentsData($: EngineInterface, ctx: Ctx, s: SessionSnap): Promise<AgentsData> {
   const g = await read($, git)
-  const config = await read($, avatar)
+  const cfg = await read($, avatar)
   const term = await read($, terminal)
   const custom = await read($, avatarFrames)
   const own = custom?.frames.idle?.[0]
@@ -507,7 +610,7 @@ async function agentsData($: EngineInterface, ctx: Ctx, s: SessionSnap): Promise
     agents: await read($, agents),
     files: await read($, files),
     expanded: new Set(await read($, expanded)),
-    emptyAvatar: picture(ctx, 'avatar-empty', px, drawnAs(config.mode, term, ctx.surface), 'Clawd, idle'),
+    emptyAvatar: picture(ctx, 'avatar-empty', px, drawnAs(cfg.mode, term, ctx.surface), 'Clawd, idle'),
     toggle: toggler($),
   }
   if (g?.branch !== undefined) d.branch = g.branch
@@ -515,6 +618,67 @@ async function agentsData($: EngineInterface, ctx: Ctx, s: SessionSnap): Promise
   if (s.cwd !== undefined) d.cwd = s.cwd
   if (s.home !== undefined) d.home = s.home
   return d
+}
+
+/** Saves the avatar settings to `$.store` (paths, never bytes) and reloads the sprite. */
+async function setAvatar($: EngineInterface, change: (c: AvatarConfig) => AvatarConfig): Promise<void> {
+  const next = await update($, avatar, change)
+  await persist($, STORE.avatar, next)
+  frameCache.clear()
+  await loadAvatar($)
+}
+
+async function avatarData($: EngineInterface, ctx: Ctx): Promise<AvatarData> {
+  const c = await read($, avatar)
+  const custom = await read($, avatarFrames)
+  const state = await read($, avatarState)
+  const isPreviewing = await read($, previewing)
+  const term = parseTerminalWord(await read($, terminal))
+  const pal = ctx.pal.sprite
+  const thumbs = {} as Record<AvatarState, Pixels>
+  for (const st of STATES) thumbs[st] = custom ? halve(framePixels(custom, st, 0, pal)) : mini(sprite(st, pal), pal.eye)
+  const first = framePixels(custom, state, 0, pal)
+  return {
+    config: c,
+    state,
+    preview: await avatarPicture($, ctx, 'avatar-preview'),
+    thumbs,
+    frame: animFrame,
+    frameCount: frameCount(custom, state),
+    canvas: { w: first.reduce((n, r) => Math.max(n, r.length), 0), h: first.length },
+    drawn: drawnAs(c.mode, await read($, terminal), ctx.surface),
+    source: custom ? baseName(custom.source) : 'built-in Clawd',
+    note: await read($, avatarNote),
+    terminal: term,
+    previewing: isPreviewing,
+    setSpritePath: path => {
+      void setAvatar($, a => ({ ...a, spritePath: path.trim() }))
+    },
+    setSheetPath: path => {
+      void setAvatar($, a => ({ ...a, sheetPath: path.trim() }))
+    },
+    setFramesPerRow: text => {
+      const n = Math.round(Number(text))
+      if (Number.isFinite(n) && n >= 1 && n <= 64) void setAvatar($, a => ({ ...a, framesPerRow: n }))
+      else void update($, avatarNote, () => `Frames/row takes a whole number from 1 to 64, not "${text}".`)
+    },
+    setMode: m => {
+      void setAvatar($, a => ({ ...a, mode: m }))
+    },
+    reset: () => {
+      void (async () => {
+        await update($, avatarNote, () => '')
+        await update($, previewing, () => false)
+        await setAvatar($, () => DEFAULT_AVATAR)
+      })()
+    },
+    togglePreview: () => {
+      void (async () => {
+        await update($, previewing, on => !on)
+        startAnimator($)
+      })()
+    },
+  }
 }
 
 async function gitData($: EngineInterface): Promise<GitData> {
@@ -553,8 +717,10 @@ export async function drawPane($: EngineInterface, e: RenderInput<'Pane'>): Prom
   }
   const active = await read($, tab)
   const s = await read($, session)
+  if (e.surface === 'terminal') animTargets = {}
   const selectTab = (id: TabId) => {
     void update($, tab, () => id)
+    startAnimator($)
   }
   let body: RenderElement
   switch (active) {
@@ -569,6 +735,9 @@ export async function drawPane($: EngineInterface, e: RenderInput<'Pane'>): Prom
       break
     case 'git':
       body = gitTab(ctx, await gitData($))
+      break
+    case 'avatar':
+      body = avatarTab(ctx, await avatarData($, ctx))
       break
     default:
       body = placeholder(ctx, `${active} — not drawn yet`)

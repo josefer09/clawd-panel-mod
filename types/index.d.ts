@@ -196,6 +196,7 @@ declare module 'claude-code' {
       avatarState: AvatarState
       avatarFrames: SpriteFrames | null
       avatarNote: string
+      previewing: boolean
       lifetimeTurns: number
       terminal: string
     }

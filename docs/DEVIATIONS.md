@@ -237,3 +237,64 @@ screen; the first group covers the build itself.
 - **Instead**: the worktree's folder name from `%(worktreepath)`; a branch a
   subagent works on in a worktree the mod saw but git does not list is marked
   `▣ agent`.
+
+## Avatar (1f) and the sprite pipeline
+
+### Images draw in kitty and Ghostty only
+
+- **Mockup / brief**: `Image (kitty/Ghostty/iTerm2/WezTerm)`, foot too.
+- **Why not**: Claude Code draws an `Image` with the kitty graphics protocol's
+  Unicode placeholders, which it detects in kitty 0.28+ and Ghostty only, and
+  never inside tmux or screen. iTerm2, WezTerm and foot get the `alt` text.
+- **Instead**: the render mode is `Auto` (an Image where the terminal draws
+  one, cells elsewhere), `Image` or `Pixel cells`. The detected line says
+  whether the image protocol is available. `CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1`
+  is honoured, as Claude Code honours it.
+
+### A Select, not radio buttons
+
+- **Mockup**: `( ) Image` / `(●) Pixel cells` radio rows.
+- **Instead**: the `Select` the brief asks for, with a third option, `Auto`.
+
+### The preview box's label
+
+- **Mockup**: ` preview ` written into the box's top border.
+- **Why not**: a `Box` border takes no title.
+- **Instead**: a rounded box in the line color around the preview and its
+  glow; the facts beside it say what it shows.
+
+### Animation frames are added to the design
+
+- **Mockup**: one picture per state and "frame 2 / 4".
+- **Instead**: frame 0 of each state is the mockup's picture, pixel for pixel;
+  frames 1 to 3 move one detail (idle blinks, the bulb flickers, the hammer
+  lifts and sparks, the heart bobs). They play at 6 fps through `$.ui.blit`
+  while the pane is open, on the terminal only; the desktop shows frame 0.
+  The frame counter shows the frame at the last full draw (a blit does not
+  redraw the text).
+
+### Custom sprites
+
+- A **sprite path** is one PNG used for every state. A **sheet** is a grid:
+  `Frames/row` frames across, one row per state in the order idle, thinking,
+  tool, done; the frame height follows Clawd's 24:28 proportion, a sheet with
+  fewer rows repeats its last row, and a blank frame ends a row. The sheet
+  wins when both are set.
+- PNGs are decoded by the mod (no image API exists in the hooks environment):
+  non-interlaced, any color type, bit depths 1–16, up to 2048×2048.
+- Frames are fitted to 24×28 pixels for cells. In Image mode a single sprite
+  is drawn from its file at full resolution (the terminal reads it); a sheet
+  is drawn from its fitted frames.
+- `$.store` keeps the paths, the frames per row and the mode, never the bytes.
+- Fields submit with Enter (`⏎ load`, `⏎ set`); the frame size shows on the
+  line under them, not beside `Frames/row`.
+- On the mobile app (no `Input` or `Select`) the settings are shown read-only.
+
+### Assets
+
+- **Brief**: extract sprite or avatar assets from the design project.
+- **How**: the design project draws Clawd in code (`sprite()`); its
+  `uploads/` and `shots/` hold reference screenshots, not sprites.
+  `scripts/build-assets.ts` renders the ported sprites to
+  `assets/clawd-sheet.png` (4 states × 4 frames) and `assets/clawd-<state>.png`,
+  which also serve as a sheet example to load.
