@@ -143,9 +143,27 @@ export function firstRef(refs: string | undefined): string | undefined {
   return first.startsWith('HEAD -> ') ? first.slice('HEAD -> '.length) : first.replace(/^tag: /, '')
 }
 
-/** `git log --graph`'s guides in the box-drawing glyphs the mockup draws. */
+/**
+ * `git log --graph`'s guides in the box-drawing glyphs the mockup draws: `*`
+ * a commit `●`, `|` a lane `│`, and a lane joining its left neighbour
+ * (`|/`, `|\\`) the joint `├─╯` or `├─╮`.
+ */
 export function graphGlyphs(graph: string): string {
-  return graph.replace(/\*/g, '●').replace(/\|/g, '│').replace(/\//g, '╯').replace(/\\/g, '╮').replace(/_/g, '─')
+  const out = Array.from(graph).map(ch => (ch === '*' ? '●' : ch === '|' ? '│' : ch === '_' ? '─' : ch))
+  for (let i = 0; i < out.length; i++) {
+    const ch = out[i]
+    if (ch !== '/' && ch !== '\\') continue
+    if (i % 2 === 1 && (out[i - 1] === '│' || out[i - 1] === '●')) {
+      if (out[i - 1] === '│') out[i - 1] = '├'
+      out[i] = '─'
+      const corner = ch === '/' ? '╯' : '╮'
+      if (out[i + 1] === undefined || out[i + 1] === ' ') out[i + 1] = corner
+      else out[i] = corner
+    } else {
+      out[i] = ch === '/' ? '╱' : '╲'
+    }
+  }
+  return out.join('')
 }
 
 /** Seconds as the shortest unit that fits: `45s`, `2m`, `3h`, `4d`, `5w`. */

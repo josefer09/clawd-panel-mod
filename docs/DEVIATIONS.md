@@ -206,3 +206,34 @@ screen; the first group covers the build itself.
 - Drawn exactly as the mockup crops it (the idle sprite below its tenth pixel
   row, doubled), in the avatar's render mode. With a custom sprite loaded,
   its idle frame is drawn (doubled when it is 24×28 or smaller).
+
+## Git (1e)
+
+### The graph is git's own, in the mockup's glyphs
+
+- **Mockup**: hand-drawn lanes, with a merge drawn `●─╮` on the merge
+  commit's own row.
+- **How**: the log is `git log --graph --all --date-order -n 13`, and its
+  guides are mapped to the mockup's glyphs (`*` `●`, `|` `│`, `|/` `├─╯`,
+  `|\` `├─╮`), colored by lane. Git draws a merge's fork on the row after the
+  merge commit, so `├─╮` sits one row lower than the mockup's `●─╮`. A
+  diagonal git cannot fold into a joint is drawn `╱` or `╲`.
+
+### Title stamp
+
+- **Mockup**: `GIT ──── [ Refresh ]`.
+- **Instead**: the same, with the age of the last read (`12s ago`) before the
+  button.
+
+### Lists are capped
+
+- Changed files show the first 8, then `… N more`; branches the first 8 (the
+  current branch first), then `… N more`. Untracked files are listed with
+  `?` after the tracked changes. Binary files have no line counts.
+
+### Branch marks
+
+- **Mockup**: `▣ reviewer` beside a branch checked out in a worktree.
+- **Instead**: the worktree's folder name from `%(worktreepath)`; a branch a
+  subagent works on in a worktree the mod saw but git does not list is marked
+  `▣ agent`.
