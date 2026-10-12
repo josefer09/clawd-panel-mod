@@ -1,0 +1,5 @@
+# Laid by the engine beside a mod it loads from a watched folder.
+.claude-plugin/types/
+node_modules/
+.claude/settings.local.json
+.DS_Store
