@@ -61,3 +61,57 @@ screen; the first group covers the build itself.
 - **Mockup**: `├────┤` rules that join the gold frame.
 - **Why not**: the frame is the engine's, so there is nothing to join.
 - **Instead**: full-width `─` rules in the line color.
+
+### Tab hotkeys are drawn by the engine
+
+- **Mockup**: ` 1: Home ` inverse red as one chip.
+- **Why not**: a `plain` Button with a `hotkey` is drawn by the engine as
+  `1: ` followed by its label; the plugin styles only the label part.
+- **Instead**: the label (` Home `) carries the inverse red chip; the engine's
+  `1: ` sits before it in its own style.
+
+### The panel surface is not painted
+
+- **Mockup**: the panel is filled with Dark `#2B2A29`.
+- **Why not**: a pane's body sits on the terminal's own background; filling
+  every cell would fight light terminals and the engine's frame.
+- **Instead**: the terminal's background shows through. A light terminal can
+  use the `pyra-light` theme (`userConfig.theme`), mapped from the design
+  system's `pyra-light` tokens.
+
+## Home (1a)
+
+### Radar and sparkline labels inside a Raster are not bold
+
+- **Mockup**: radar values (`71%`, `0.42`) bold.
+- **Why not**: the radar and its labels are one `Raster` so each label sits
+  exactly at its vertex; a Raster cell has a glyph and two colors, no weight.
+- **Instead**: values in primary text, labels dim. On the desktop the radar is
+  an `Svg` with bold values.
+
+### Raster colors are rounded
+
+- **Mockup**: exact hex per cell.
+- **Why not**: the terminal's Raster palette paints 1,024 distinct color pairs
+  and rounds the rest to the nearest.
+- **Instead**: the HUD keeps to the design's few colors, so rounding is rare.
+
+### `Lv.` is defined by the mod
+
+- **Mockup**: `Lv. 12` with no data behind it.
+- **Instead**: `⌊√(turns this mod has seen end, across sessions)⌋`, counted
+  from `turn.complete` and kept in `$.store` (documented in DATA-SOURCES.md).
+  No figure is invented: it is a count of real turns.
+
+### Usage stamp
+
+- **Mockup**: `summary · 12s ago`.
+- **Instead**: the same words; `summary` (or `full` after a precise recount)
+  is how the /context breakdown was counted, the age is of the last usage read
+  (`session.measure`, `turn.complete`), advanced by a 10 s clock.
+
+### Desktop fallbacks
+
+- `Raster` and `Image` are terminal-only. On the desktop app (and other
+  remote surfaces) Clawd is an `Svg` of the same pixels, the radar an `Svg`,
+  and the sparkline the same glyphs as text.

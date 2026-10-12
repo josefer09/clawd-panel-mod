@@ -3,7 +3,20 @@
 // (right-aligned ones); a `Line` here is the same idea as a `Text` of styled
 // spans padded to the body's width, so the layout keeps to the cell grid.
 
-import type { BoxProps, ButtonProps, ElementConstructor, RenderElement, RenderSurface, TextProps } from 'claude-code'
+import type {
+  BoxProps,
+  ButtonProps,
+  ElementConstructor,
+  ElementTable,
+  ImageProps,
+  InputProps,
+  RasterProps,
+  RenderElement,
+  RenderSurface,
+  SelectProps,
+  SvgProps,
+  TextProps,
+} from 'claude-code'
 
 import type { Palette } from '../theme'
 
@@ -14,8 +27,43 @@ export type Els = {
   Button: ElementConstructor<ButtonProps>
 }
 
+/** The elements only some surfaces have; absent where the surface lacks them. */
+export type Extras = {
+  Raster?: ElementConstructor<RasterProps>
+  Image?: ElementConstructor<ImageProps>
+  Svg?: ElementConstructor<SvgProps>
+  Input?: ElementConstructor<InputProps>
+  Select?: ElementConstructor<SelectProps>
+}
+
+/**
+ * Splits a surface's element table into the shared elements and the extras
+ * that surface draws. A table is completed with every element name (one a
+ * surface lacks draws an empty fragment), so the surface decides, not the
+ * table: Raster and Image on the terminal, Svg elsewhere, Input and Select
+ * everywhere but mobile.
+ */
+export function elementsOf(table: ElementTable, surface: RenderSurface): { el: Els; extra: Extras } {
+  const t = table as unknown as Els & Required<Extras>
+  const extra: Extras = {}
+  if (surface === 'terminal') {
+    extra.Raster = t.Raster
+    extra.Image = t.Image
+  } else {
+    extra.Svg = t.Svg
+  }
+  if (surface !== 'mobile') {
+    extra.Input = t.Input
+    extra.Select = t.Select
+  }
+  return { el: { Box: t.Box, Text: t.Text, Button: t.Button }, extra }
+}
+
 export type Ctx = {
   el: Els
+  extra: Extras
+  /** The pane's request id, which `$.ui.blit` names. */
+  site: string
   surface: RenderSurface
   /** Cells across the body. */
   width: number

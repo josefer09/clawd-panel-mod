@@ -4,19 +4,26 @@
 // and what to draw in src/render (pure).
 
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, HookOf, RenderElement, RenderInput, Timer } from 'claude-code'
+import type { EngineInterface, HookOf, RenderElement, RenderInput, RenderSurface, Timer } from 'claude-code'
 
-import type { GitSnap, TabId } from '../types'
+import type { AvatarState, GitSnap, RenderMode, SessionSnap, TabId } from '../types'
 import { completed, isActive, listed, located, LOCATION_ARGV, parseLocation, spawned, stepped } from './collectors/agents'
 import { GRID_COLUMNS, reduceBreakdown } from './collectors/context'
 import { FILE_TOOLS, fileOf, markFile } from './collectors/files'
 import { ARGV, emptyGit, parseBranches, parseFiles, parseLog, parseNumstat, parseStatus, withNumstat } from './collectors/git'
 import { addStep, alertStep, alertText, baselineCost, effortWord, recordCost, snapshotUsage } from './collectors/session'
-import { detectTerminal, terminalWord } from './collectors/terminal'
+import { detectTerminal, parseTerminalWord, terminalWord } from './collectors/terminal'
 import type { TerminalEnv } from './collectors/terminal'
 import { config, VERSION } from './config'
 import { bodyWidth, pane, placeholder } from './render/draw'
 import { isTab } from './render/pane'
+import { picture } from './render/avatar'
+import type { Drawn } from './render/avatar'
+import { framePixels, levelOf } from './render/avatarFrames'
+import { STATE_TEXT } from './render/raster/sprite'
+import { home } from './render/tabs/home'
+import type { HomeData } from './render/tabs/home'
+import { elementsOf } from './render/ui'
 import type { Ctx } from './render/ui'
 import { DEFAULT_AVATAR, DEFAULT_SESSION, EMPTY_TOKENS, isAvatarConfig, PANE, STORE } from './state'
 import { paletteOf } from './theme'
@@ -115,7 +122,8 @@ async function refreshSession($: EngineInterface): Promise<void> {
     const model = await $.session.model()
     const turns = await $.session.turns()
     const cwd = await $.session.cwd()
-    await update($, session, s => ({ ...s, model, turns, cwd }))
+    const home = await $.env.get('HOME')
+    await update($, session, s => (home === undefined ? { ...s, model, turns, cwd } : { ...s, model, turns, cwd, home }))
   } catch (error) {
     debug($, 'the session was not read', error)
   }
@@ -402,12 +410,63 @@ export const onCommand: HookOf<'command.run'> = async ($, e) => {
 }
 
 // ---------------------------------------------------------------------------
-// Drawing
+// Drawing: read state, build the tree. No git, files or model calls here;
+// the handlers built here may do I/O, as a press is not a render.
+
+/** Whether the avatar draws as an Image or as Raster cells, from the setting and the terminal. */
+function drawnAs(mode: RenderMode, term: string, surface: RenderSurface): Drawn {
+  if (surface !== 'terminal') return 'cells'
+  if (mode === 'cells') return 'cells'
+  if (mode === 'image') return 'image'
+  return parseTerminalWord(term).images ? 'image' : 'cells'
+}
+
+/** Clawd's picture for the current state, as `key`: the built-in sprite or the person's own frames. */
+async function avatarPicture($: EngineInterface, ctx: Ctx, key: string, override?: { state: AvatarState; frame: number }): Promise<RenderElement> {
+  const config = await read($, avatar)
+  const term = await read($, terminal)
+  const state = override?.state ?? (await read($, avatarState))
+  const frame = override?.frame ?? 0
+  const custom = await read($, avatarFrames)
+  const px = framePixels(custom, state, frame, ctx.pal.sprite)
+  return picture(ctx, key, px, drawnAs(config.mode, term, ctx.surface), `Clawd · ${STATE_TEXT[state]}`)
+}
+
+async function homeData($: EngineInterface, ctx: Ctx, s: SessionSnap): Promise<HomeData> {
+  const g = await read($, git)
+  const d: HomeData = {
+    turns: s.turns,
+    usage: await read($, usage),
+    tokens: await read($, mainTokens),
+    cost: await read($, cost),
+    alert: await read($, alert),
+    threshold: config().alertThreshold,
+    avatarState: await read($, avatarState),
+    level: levelOf(await read($, lifetimeTurns)),
+    detail: (await read($, breakdown))?.detail ?? 'summary',
+    avatar: await avatarPicture($, ctx, 'avatar-home'),
+    refresh: () => {
+      void refreshUsage($, 'summary')
+      void refreshGit($)
+    },
+  }
+  if (g?.branch !== undefined) d.branch = g.branch
+  if (g?.ahead !== undefined) d.ahead = g.ahead
+  if (g?.behind !== undefined) d.behind = g.behind
+  if (s.model !== undefined) d.model = s.model
+  if (s.effort !== undefined) d.effort = s.effort
+  if (s.cwd !== undefined) d.cwd = s.cwd
+  if (s.home !== undefined) d.home = s.home
+  return d
+}
 
 export async function drawPane($: EngineInterface, e: RenderInput<'Pane'>): Promise<RenderElement> {
   const c = config()
+  const { el, extra } = elementsOf($.ui.resolve(e), e.surface)
   const ctx: Ctx = {
-    el: $.ui.resolve(e),
+    el,
+    extra,
+    site: PANE,
     surface: e.surface,
     width: bodyWidth(e.props.bodyColumns),
     pal: paletteOf(c.theme),
@@ -418,5 +477,13 @@ export async function drawPane($: EngineInterface, e: RenderInput<'Pane'>): Prom
   const selectTab = (id: TabId) => {
     void update($, tab, () => id)
   }
-  return pane(ctx, { name: c.title, version: VERSION, isWorking: s.isWorking, tab: active, selectTab }, placeholder(ctx, `${active} — not drawn yet`))
+  let body: RenderElement
+  switch (active) {
+    case 'home':
+      body = home(ctx, await homeData($, ctx, s))
+      break
+    default:
+      body = placeholder(ctx, `${active} — not drawn yet`)
+  }
+  return pane(ctx, { name: c.title, version: VERSION, isWorking: s.isWorking, tab: active, selectTab }, body)
 }
