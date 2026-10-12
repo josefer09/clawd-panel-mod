@@ -161,7 +161,7 @@ export function stubSession(on: On, overrides: Partial<Fixture> = {}): Fixture {
           }
         : {}),
     }
-    return { value: { startedAt: 0, context, rateLimits: fx.rateLimits, cost: { usd: fx.costUsd } } }
+    return { value: { startedAt: Date.parse('2026-10-11T18:18:00Z'), context, rateLimits: fx.rateLimits, cost: { usd: fx.costUsd } } }
   })
   on('session.model', () => ({ value: 'Opus 5.5' }))
   on('session.turns', () => ({ value: 37 }))

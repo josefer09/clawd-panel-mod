@@ -75,6 +75,8 @@ export type SessionSnap = {
   /** `$.session.turns()`. */
   turns: number
   cwd?: string
+  /** `$HOME`, to draw paths under it as `~`. */
+  home?: string
   /** True between the main loop's `turn.start` and its `turn.complete`. */
   isWorking: boolean
   /** How many times the main conversation was compacted. */
