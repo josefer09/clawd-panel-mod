@@ -4,6 +4,15 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.6.0] - 2026-10-11
+
+### Added
+
+- Avatar tab (board 1f): the preview with state, frame, canvas, cells, fps and source; the four state frames with the current one marked; sprite path, sheet and frames-per-row fields; the render-mode select with the detected terminal; Reset to Clawd and Preview animation.
+- Sprite pipeline: a dependency-free PNG decoder (inflate and row filters), sprite sheets cut per state and fitted to 24×28, only paths kept in `$.store`.
+- Animation at 6 fps with `$.ui.blit` for the Home avatar and the preview, Image (kitty graphics) or Raster cells per the render mode.
+- `assets/`: Clawd's sprite sheet and per-state PNGs, rendered from the ported sprites by `scripts/build-assets.ts`.
+
 ## [0.5.0] - 2026-10-11
 
 ### Added
