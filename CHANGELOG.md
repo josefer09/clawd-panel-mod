@@ -4,6 +4,15 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.1.0] - 2026-10-11
+
+### Added
+
+- Collectors (pure) for usage, the /context breakdown, subagents, files, git and the terminal, with unit tests.
+- Engine hooks: `session.start`, `session.measure`, `session.compact`, `turn.start`, `turn.step`, `turn.complete`, `tool.call`, `agent.spawn`, and `classic.SessionStart` (re-reads after `/clear`, `/resume`, `/branch` and compaction).
+- Context alert toast, once per crossing of the threshold.
+- `docs/DATA-SOURCES.md`: every figure, its API source and when it is read.
+
 ## [0.0.0] - 2026-10-11
 
 ### Added

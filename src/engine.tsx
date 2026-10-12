@@ -4,9 +4,16 @@
 // and what to draw in src/render (pure).
 
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, HookOf, RenderElement, RenderInput } from 'claude-code'
+import type { EngineInterface, HookOf, RenderElement, RenderInput, Timer } from 'claude-code'
 
-import type { TabId } from '../types'
+import type { GitSnap, TabId } from '../types'
+import { completed, isActive, listed, located, LOCATION_ARGV, parseLocation, spawned, stepped } from './collectors/agents'
+import { GRID_COLUMNS, reduceBreakdown } from './collectors/context'
+import { FILE_TOOLS, fileOf, markFile } from './collectors/files'
+import { ARGV, emptyGit, parseBranches, parseFiles, parseLog, parseNumstat, parseStatus, withNumstat } from './collectors/git'
+import { addStep, alertStep, alertText, baselineCost, effortWord, recordCost, snapshotUsage } from './collectors/session'
+import { detectTerminal, terminalWord } from './collectors/terminal'
+import type { TerminalEnv } from './collectors/terminal'
 import { config, VERSION } from './config'
 import { bodyWidth, pane, placeholder } from './render/draw'
 import { isTab } from './render/pane'
@@ -70,11 +77,161 @@ async function rehydrate($: EngineInterface): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// Collectors' I/O: each asks `$`, hands the answer to a pure collector, and
+// writes the result. A failed read leaves the last good value standing.
+
+function debug($: EngineInterface, what: string, error: unknown): void {
+  $.ui.log(`clawd-panel: ${what}: ${error instanceof Error ? error.message : String(error)}`, { to: 'debug' })
+}
+
+/** Reads `$.session.usage()`, with the /context breakdown when `detail` is given. */
+async function refreshUsage($: EngineInterface, detail?: 'summary' | 'full'): Promise<void> {
+  try {
+    const u = detail ? await $.session.usage({ breakdown: detail, columns: GRID_COLUMNS }) : await $.session.usage()
+    const at = await $.clock.now()
+    const snap = snapshotUsage(u, at, u.startedAt)
+    await update($, usage, () => snap)
+    const b = u.context.breakdown
+    if (b !== undefined) await update($, breakdown, () => reduceBreakdown(b, detail ?? 'summary', at))
+    await checkAlert($, snap.contextPercent)
+  } catch (error) {
+    debug($, 'usage was not read', error)
+  }
+}
+
+/** Raises the context alert once per crossing of the threshold. */
+async function checkAlert($: EngineInterface, percent: number | undefined): Promise<void> {
+  let toast = false
+  await update($, alert, a => {
+    const step = alertStep(a, percent, config().alertThreshold)
+    toast = step.toast
+    return step.next
+  })
+  if (toast && percent !== undefined) $.ui.toast(alertText(percent), { timeoutMs: 6000 })
+}
+
+async function refreshSession($: EngineInterface): Promise<void> {
+  try {
+    const model = await $.session.model()
+    const turns = await $.session.turns()
+    const cwd = await $.session.cwd()
+    await update($, session, s => ({ ...s, model, turns, cwd }))
+  } catch (error) {
+    debug($, 'the session was not read', error)
+  }
+}
+
+async function refreshAgents($: EngineInterface): Promise<void> {
+  try {
+    const list = await $.agent.list()
+    const at = await $.clock.now()
+    await update($, agents, a => listed(a, list, at))
+  } catch (error) {
+    debug($, 'the agent list was not read', error)
+  }
+}
+
+/** Runs a git command; its stdout, or undefined when git failed or is missing. */
+async function gitOut($: EngineInterface, argv: readonly string[], cwd?: string): Promise<string | undefined> {
+  try {
+    const r = await $.process.run(argv, cwd === undefined ? { timeoutMs: 10000 } : { cwd, timeoutMs: 10000 })
+    return r.exitCode === 0 ? r.stdout : undefined
+  } catch {
+    return undefined
+  }
+}
+
+async function refreshGit($: EngineInterface): Promise<void> {
+  const at = await $.clock.now()
+  const top = await gitOut($, ARGV.toplevel)
+  if (top === undefined) {
+    await update($, git, () => emptyGit(at, 'not a git repository'))
+    return
+  }
+  const root = top.trim()
+  const status = parseStatus((await gitOut($, ARGV.status)) ?? '')
+  const numstat = parseNumstat((await gitOut($, ARGV.numstat)) ?? '')
+  const branches = parseBranches((await gitOut($, ARGV.branches)) ?? '', Math.floor(at / 1000), root)
+  const log = parseLog((await gitOut($, ARGV.log)) ?? '')
+  const snap: GitSnap = {
+    at,
+    isRepo: true,
+    root,
+    modified: status.modified,
+    staged: status.staged,
+    untracked: status.untracked,
+    changes: withNumstat(status.changes, numstat),
+    branches,
+    worktrees: branches.filter(b => b.worktree !== undefined).length,
+    log,
+  }
+  if (status.branch !== undefined) snap.branch = status.branch
+  if (status.head !== undefined) snap.head = status.head
+  if (status.ahead !== undefined) snap.ahead = status.ahead
+  if (status.behind !== undefined) snap.behind = status.behind
+  await update($, git, () => snap)
+  const listing = await gitOut($, ARGV.files)
+  if (listing !== undefined) await update($, tracked, () => ({ root, paths: parseFiles(listing) }))
+}
+
+let gitTimer: Timer | undefined
+
+/** Refreshes git once things settle: a burst of turns runs git once. */
+function refreshGitSoon($: EngineInterface): void {
+  gitTimer?.cancel()
+  gitTimer = $.clock.after(1500, () => {
+    gitTimer = undefined
+    void refreshGit($)
+  })
+}
+
+/** Finds the branch and worktree of a subagent that runs in its own `cwd`. */
+async function locateAgent($: EngineInterface, agentId: string, cwd: string): Promise<void> {
+  const out = await gitOut($, LOCATION_ARGV, cwd)
+  if (out === undefined) return
+  const where = parseLocation(out)
+  await update($, agents, a => located(a, agentId, where.branch, where.worktree))
+}
+
+async function detectTerminalOf($: EngineInterface): Promise<void> {
+  const env: TerminalEnv = {}
+  const termProgram = await $.env.get('TERM_PROGRAM')
+  if (termProgram !== undefined) env.TERM_PROGRAM = termProgram
+  const term = await $.env.get('TERM')
+  if (term !== undefined) env.TERM = term
+  const tmux = await $.env.get('TMUX')
+  if (tmux !== undefined) env.TMUX = tmux
+  const sty = await $.env.get('STY')
+  if (sty !== undefined) env.STY = sty
+  const kitty = await $.env.get('KITTY_WINDOW_ID')
+  if (kitty !== undefined) env.KITTY_WINDOW_ID = kitty
+  const ghostty = await $.env.get('GHOSTTY_RESOURCES_DIR')
+  if (ghostty !== undefined) env.GHOSTTY_RESOURCES_DIR = ghostty
+  const force = await $.env.get('CLAUDE_CODE_FORCE_TERMINAL_IMAGES')
+  if (force !== undefined) env.CLAUDE_CODE_FORCE_TERMINAL_IMAGES = force
+  await update($, terminal, () => terminalWord(detectTerminal(env)))
+}
+
+/** Reads everything once: at start, and after /clear, /resume and /branch reset `$.state`. */
+async function readAll($: EngineInterface): Promise<void> {
+  await rehydrate($)
+  const at = await $.clock.now()
+  await update($, now, () => at)
+  await refreshSession($)
+  await refreshUsage($, 'summary')
+  const u = await read($, usage)
+  await update($, cost, ledger => baselineCost(ledger, u?.costUsd))
+  await refreshAgents($)
+  await detectTerminalOf($)
+  refreshGitSoon($)
+}
+
+let ticker: Timer | undefined
+
+// ---------------------------------------------------------------------------
 // Session lifecycle
 
 export const onSessionStart: HookOf<'session.start'> = async ($, e, next) => {
-  await rehydrate($)
-  await update($, now, () => Date.now())
   try {
     await $.command.register({
       name: 'clawd',
@@ -88,14 +245,135 @@ export const onSessionStart: HookOf<'session.start'> = async ($, e, next) => {
       immediate: true,
     })
   } catch (error) {
-    $.ui.log(`clawd-panel: a command was not registered: ${String(error)}`, { to: 'debug' })
+    debug($, 'a command was not registered', error)
+  }
+  await readAll($)
+  ticker?.cancel()
+  ticker = $.clock.every(10000, () => {
+    void tick($)
+  })
+  return next(e)
+}
+
+/** Every ten seconds: the clock the "ago" stamps read, and the status of running agents. */
+async function tick($: EngineInterface): Promise<void> {
+  const at = await $.clock.now()
+  await update($, now, () => at)
+  const list = Object.values(await read($, agents))
+  if (list.some(a => isActive(a.status))) await refreshAgents($)
+}
+
+/** After /clear, /resume and /branch: `$.state` is back to its defaults. After a compaction: the window changed. */
+export const onSessionStartClassic: HookOf<'classic.SessionStart'> = async ($, e, next) => {
+  if (e.source === 'compact') {
+    await refreshUsage($, 'summary')
+  } else {
+    await readAll($)
   }
   return next(e)
 }
 
-export const onSessionReset: HookOf<'classic.SessionStart'> = async ($, e, next) => {
-  await rehydrate($)
+export const onMeasure: HookOf<'session.measure'> = async ($, e, next) => {
+  const at = await $.clock.now()
+  const before = await read($, usage)
+  const snap = snapshotUsage(e, at, before?.startedAt ?? at)
+  await update($, usage, () => snap)
+  await checkAlert($, snap.contextPercent)
   return next(e)
+}
+
+export const onCompact: HookOf<'session.compact'> = async ($, e, next) => {
+  const r = await next(e)
+  if (e.agentId === undefined && e.trigger !== 'precompute' && !('skip' in r)) {
+    const at = await $.clock.now()
+    await update($, session, s => ({ ...s, compactions: s.compactions + 1, lastCompactAt: at }))
+  }
+  return r
+}
+
+// ---------------------------------------------------------------------------
+// Turns
+
+export const onTurnStart: HookOf<'turn.start'> = async ($, e, next) => {
+  await update($, session, s => ({ ...s, isWorking: true }))
+  await update($, avatarState, () => 'thinking')
+  return next(e)
+}
+
+export const onStep: HookOf<'turn.step'> = async function* ($, e, next) {
+  const effort = effortWord(e.effort)
+  if (e.agentId === undefined) {
+    await update($, session, s => (effort === undefined ? s : { ...s, effort }))
+    await update($, avatarState, st => (st === 'tool' ? st : 'thinking'))
+  }
+  const r = yield* next(e)
+  if (e.agentId === undefined) {
+    await update($, mainTokens, t => addStep(t, r.usage))
+  } else {
+    const at = await $.clock.now()
+    const id = e.agentId
+    await update($, agents, a => stepped(a, id, r.usage, effort, at))
+  }
+  return r
+}
+
+let idleTimer: Timer | undefined
+
+export const onTurnComplete: HookOf<'turn.complete'> = async ($, e, next) => {
+  const r = await next(e)
+  if (e.agentId !== undefined) {
+    const at = await $.clock.now()
+    const id = e.agentId
+    await update($, agents, a => completed(a, id, at, e.isAborted))
+    await refreshAgents($)
+    return r
+  }
+  await update($, session, s => ({ ...s, isWorking: false }))
+  await update($, avatarState, () => 'done')
+  idleTimer?.cancel()
+  idleTimer = $.clock.after(4000, () => {
+    void update($, avatarState, st => (st === 'done' ? 'idle' : st))
+  })
+  await refreshUsage($, 'summary')
+  const u = await read($, usage)
+  await update($, cost, ledger => recordCost(ledger, u?.costUsd))
+  await refreshSession($)
+  const turns = await update($, lifetimeTurns, n => n + 1)
+  await persist($, STORE.lifetimeTurns, turns)
+  await refreshAgents($)
+  refreshGitSoon($)
+  return r
+}
+
+// ---------------------------------------------------------------------------
+// Tools and subagents
+
+export const onToolCall: HookOf<'tool.call'> = async ($, e, next) => {
+  const isMain = e.agentId === undefined
+  if (isMain) await update($, avatarState, () => 'tool')
+  const r = await next(e)
+  if (isMain) await update($, avatarState, st => (st === 'tool' ? 'thinking' : st))
+  const file = fileOf(String(e.tool), e as unknown as Record<string, unknown>)
+  if (file !== undefined && (FILE_TOOLS as readonly string[]).includes(String(e.tool)) && r.deny === undefined && r.isError !== true) {
+    const agentId = e.agentId ?? ''
+    await update($, files, f => markFile(f, file.path, file.kind, agentId))
+  }
+  return r
+}
+
+export const onSpawn: HookOf<'agent.spawn'> = async ($, e, next) => {
+  const r = await next(e)
+  if ('deny' in r && r.deny !== undefined) return r
+  const at = await $.clock.now()
+  await update($, agents, a => spawned(a, e, r, at))
+  const id = r.agentId
+  const cwd = e.cwd
+  if (id !== undefined && cwd !== undefined) {
+    $.clock.after(0, () => {
+      void locateAgent($, id, cwd)
+    })
+  }
+  return r
 }
 
 // ---------------------------------------------------------------------------
