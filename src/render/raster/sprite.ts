@@ -16,6 +16,23 @@ export const STATES: readonly AvatarState[] = ['idle', 'thinking', 'tool', 'done
 export const FRAMES = 4
 export const FPS = 6
 
+/**
+ * Which frame each tick of the 6 fps clock shows, per state: a blink every
+ * three seconds, the bulb pulsing once a second, the hammer swinging, the heart
+ * bobbing. Custom frames play in order instead.
+ */
+export const SEQUENCE: Record<AvatarState, readonly number[]> = {
+  idle: [...Array<number>(17).fill(0), 2],
+  thinking: [0, 0, 0, 1, 1, 1],
+  tool: [0, 1, 2, 3],
+  done: [0, 0, 1, 1, 2, 2, 3, 3],
+}
+
+export function frameAt(state: AvatarState, tick: number): number {
+  const seq = SEQUENCE[state]
+  return seq[((tick % seq.length) + seq.length) % seq.length] ?? 0
+}
+
 export const STATE_TEXT: Record<AvatarState, string> = {
   idle: 'Idle',
   thinking: 'Thinking…',

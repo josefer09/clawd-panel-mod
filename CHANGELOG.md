@@ -4,6 +4,23 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [1.0.0] - 2026-10-11
+
+### Added
+
+- Band above the prompt (board 2c), toggled by `/clawd-band`: branch, model, effort, context with its bar, the 5h window and cost on the panel surface; `/clawd open HUD` opens the pane.
+- Inline layout (board 2b): with the pane above the prompt, Home draws three columns from 116 cells (usage with `↻` resets and a one-row cost sparkline, the r = 7 radar, Clawd at half size), the left column alone below that.
+- Context alert (board 2a): a banner at the top of the pane with `[ /compact now ]` (`$.session.compact()`) and `[ Dismiss ]`, beside the toast once per crossing.
+- Every tab draws on the terminal, desktop, VS Code and mobile surfaces; Raster and Image only on the terminal, Input and Select nowhere on mobile.
+- README with install via the marketplace and `--plugin-dir`, settings and local checks; LICENSE.
+
+### Changed
+
+- Clawd plays a sequence per state (a blink every three seconds, the bulb pulsing once a second, the hammer, the heart); an unchanged frame is not sent again.
+- The post-turn reads run on a timer after `turn.complete`, so the turn ends at once.
+- Lifetime turns re-read `$.store` before writing, so sessions add up instead of overwriting each other.
+- Clawd keeps the tool pose until the last of parallel tool calls ends.
+
 ## [0.6.0] - 2026-10-11
 
 ### Added

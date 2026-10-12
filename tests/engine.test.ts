@@ -49,11 +49,13 @@ test('a turn ends: cost per turn, the alert toast once, lifetime turns, avatar d
   fx.percent = 91
   fx.costUsd = 1.25
   await $.turn.complete({ turnId: 't1', answer: 'done', durationMs: 10, isAborted: false, reason: 'answer' })
+  await clock.settle()
   expect(await state($, 'cost')).toEqual({ turns: [0.25], lastTotal: 1.25 })
   expect(rec.toasts).toEqual(['▲ Context at 91% — compaction soon'])
   expect(await state($, 'avatarState')).toBe('done')
   expect(rec.store.get('lifetimeTurns')).toBe(1)
   await $.turn.complete({ turnId: 't2', answer: 'done', durationMs: 10, isAborted: false, reason: 'answer' })
+  await clock.settle()
   expect(rec.toasts.length).toBe(1)
   await clock.advance(5000)
   expect(await state($, 'avatarState')).toBe('idle')
@@ -127,4 +129,35 @@ test('session.measure updates the figures without a call', WITH_PEEK, async ($, 
   on('session.measure', ($, e) => ({ changed: e.changed }))
   await $.session.measure({ context: { window: 200000, tokens: 20000, percent: 10 }, rateLimits: [], changed: ['context'] })
   expect(await state($, 'usage')).toMatchObject({ contextPercent: 10, rateLimits: [] })
+})
+
+test('Clawd keeps the tool pose until the last of parallel tool calls ends', WITH_PEEK, async ($, on) => {
+  const clock = mock.clock(on)
+  stubBasics(on)
+  on('tool.call', async ($: any, e: any) => {
+    await clock.sleep(e.tool === 'Read' ? 100 : 200)
+    return { result: 'ok' }
+  })
+  const first = $.tool.call({ tool: 'Read', file_path: '/w/a.ts' })
+  const second = $.tool.call({ tool: 'Bash', command: 'ls' })
+  await clock.advance(150)
+  await first
+  expect(await state($, 'avatarState')).toBe('tool')
+  await clock.advance(100)
+  await second
+  expect(await state($, 'avatarState')).toBe('thinking')
+})
+
+test('lifetime turns count from the store, which other sessions add to', WITH_PEEK, async ($, on) => {
+  const clock = mock.clock(on)
+  mock.env(on, {})
+  const rec = stubBasics(on)
+  stubSession(on)
+  on('turn.complete', () => ({ text: '' }))
+  await $.session.start({ cwd: '/w', surface: 'terminal', isInteractive: true })
+  rec.store.set('lifetimeTurns', 10)
+  await $.turn.complete({ turnId: 't', answer: '', durationMs: 1, isAborted: false, reason: 'answer' })
+  await clock.settle()
+  expect(rec.store.get('lifetimeTurns')).toBe(11)
+  expect(await state($, 'lifetimeTurns')).toBe(11)
 })
