@@ -4,6 +4,12 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.5.0] - 2026-10-11
+
+### Added
+
+- Git tab (board 1e): branch with ahead/behind and head, dirty counts, changed files with lines added and removed, local branches with upstream track, worktree marks and age, and the commit graph in the mockup's glyphs, colored by lane.
+
 ## [0.4.0] - 2026-10-11
 
 ### Added

@@ -14,7 +14,7 @@ test('/clawd <tab> opens the pane on that tab', async ($, on) => {
   stubBasics(on)
   await $.command.run(cmd('clawd', 'git'))
   const ui = await $.ui.mount({ ...paneInput(), surface: 'terminal' })
-  expect(await ui.find({ type: 'Text', text: /git — not drawn yet/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^GIT / })).toBeDefined()
 })
 
 test('/clawd with an unknown tab says which tabs there are', async ($, on) => {

@@ -25,6 +25,8 @@ import { emptyStateSprite, STATE_TEXT } from './render/raster/sprite'
 import { agentsTab } from './render/tabs/agents'
 import type { AgentsData } from './render/tabs/agents'
 import { context } from './render/tabs/context'
+import { gitTab } from './render/tabs/git'
+import type { GitData } from './render/tabs/git'
 import type { ContextData } from './render/tabs/context'
 import { home } from './render/tabs/home'
 import type { HomeData } from './render/tabs/home'
@@ -515,6 +517,17 @@ async function agentsData($: EngineInterface, ctx: Ctx, s: SessionSnap): Promise
   return d
 }
 
+async function gitData($: EngineInterface): Promise<GitData> {
+  const list = Object.values(await read($, agents))
+  return {
+    git: await read($, git),
+    agentBranches: new Set(list.filter(a => a.worktree !== undefined && a.branch !== undefined).map(a => a.branch as string)),
+    refresh: () => {
+      void refreshGit($)
+    },
+  }
+}
+
 /** The Precise recount: a `full` breakdown, which sends token-count requests, once at a time. */
 async function recount($: EngineInterface): Promise<void> {
   if (await read($, recounting)) return
@@ -553,6 +566,9 @@ export async function drawPane($: EngineInterface, e: RenderInput<'Pane'>): Prom
       break
     case 'agents':
       body = agentsTab(ctx, await agentsData($, ctx, s))
+      break
+    case 'git':
+      body = gitTab(ctx, await gitData($))
       break
     default:
       body = placeholder(ctx, `${active} — not drawn yet`)
