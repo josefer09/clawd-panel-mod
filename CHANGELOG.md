@@ -4,6 +4,13 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.4.0] - 2026-10-11
+
+### Added
+
+- Agents tab (board 1c): totals header, an accordion of subagents with status chips, tokens and elapsed time; expanded rows show model, effort, branch and worktree, cwd, background, fork, parent, token breakdown, context fill, the task prompt (three lines and `[ more ]`) and a files-touched tree; children nest under their parent; the chip legend.
+- Empty state (board 1d): Clawd, "No party members deployed." and "Agents will appear here when Claude launches them."
+
 ## [0.3.0] - 2026-10-11
 
 ### Added

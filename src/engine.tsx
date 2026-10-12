@@ -20,7 +20,10 @@ import { isTab } from './render/pane'
 import { picture } from './render/avatar'
 import type { Drawn } from './render/avatar'
 import { framePixels, levelOf } from './render/avatarFrames'
-import { STATE_TEXT } from './render/raster/sprite'
+import { scale2 } from './render/raster/cells'
+import { emptyStateSprite, STATE_TEXT } from './render/raster/sprite'
+import { agentsTab } from './render/tabs/agents'
+import type { AgentsData } from './render/tabs/agents'
 import { context } from './render/tabs/context'
 import type { ContextData } from './render/tabs/context'
 import { home } from './render/tabs/home'
@@ -491,6 +494,27 @@ async function contextData($: EngineInterface, s: SessionSnap): Promise<ContextD
   return d
 }
 
+async function agentsData($: EngineInterface, ctx: Ctx, s: SessionSnap): Promise<AgentsData> {
+  const g = await read($, git)
+  const config = await read($, avatar)
+  const term = await read($, terminal)
+  const custom = await read($, avatarFrames)
+  const own = custom?.frames.idle?.[0]
+  const px = own ? (own.length <= 28 && (own[0]?.length ?? 0) <= 24 ? scale2(own) : own) : scale2(emptyStateSprite(ctx.pal.sprite))
+  const d: AgentsData = {
+    agents: await read($, agents),
+    files: await read($, files),
+    expanded: new Set(await read($, expanded)),
+    emptyAvatar: picture(ctx, 'avatar-empty', px, drawnAs(config.mode, term, ctx.surface), 'Clawd, idle'),
+    toggle: toggler($),
+  }
+  if (g?.branch !== undefined) d.branch = g.branch
+  if (g?.root !== undefined) d.root = g.root
+  if (s.cwd !== undefined) d.cwd = s.cwd
+  if (s.home !== undefined) d.home = s.home
+  return d
+}
+
 /** The Precise recount: a `full` breakdown, which sends token-count requests, once at a time. */
 async function recount($: EngineInterface): Promise<void> {
   if (await read($, recounting)) return
@@ -526,6 +550,9 @@ export async function drawPane($: EngineInterface, e: RenderInput<'Pane'>): Prom
       break
     case 'context':
       body = context(ctx, await contextData($, s))
+      break
+    case 'agents':
+      body = agentsTab(ctx, await agentsData($, ctx, s))
       break
     default:
       body = placeholder(ctx, `${active} — not drawn yet`)
