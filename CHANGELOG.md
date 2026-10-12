@@ -4,6 +4,13 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.3.0] - 2026-10-11
+
+### Added
+
+- Context tab (board 1b): stacked category bar with axis, the /context grid beside its legend (`■ = Nk tokens`), Precise recount (a `full` breakdown) with an `updated Ns ago` stamp, a grid toggle, and expandable MCP (per server, per tool), memory, skills and custom-agent lists.
+- Files tree: read / edited / untouched marks, folders open where something was touched, collapsed folders with counts, folders toggle by press.
+
 ## [0.2.0] - 2026-10-11
 
 ### Added

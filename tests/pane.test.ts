@@ -29,7 +29,7 @@ test('the tab buttons switch tabs on every surface', async ($, on) => {
     const ui = await $.ui.mount({ ...paneInput(), surface })
     expect(await ui.find({ key: 'tab-home' })).toBeDefined()
     await ui.press({ key: 'tab-context' })
-    expect(await ui.find({ type: 'Text', text: /context — not drawn yet/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^CONTEXT / })).toBeDefined()
     await ui.press({ key: 'tab-home' })
     await ui.unmount()
   }

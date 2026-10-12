@@ -21,6 +21,8 @@ import { picture } from './render/avatar'
 import type { Drawn } from './render/avatar'
 import { framePixels, levelOf } from './render/avatarFrames'
 import { STATE_TEXT } from './render/raster/sprite'
+import { context } from './render/tabs/context'
+import type { ContextData } from './render/tabs/context'
 import { home } from './render/tabs/home'
 import type { HomeData } from './render/tabs/home'
 import { elementsOf } from './render/ui'
@@ -33,7 +35,7 @@ import { paletteOf } from './theme'
 
 const tab = atom({ plugin: 'clawd-panel', key: 'tab' } as const, 'home')
 const expanded = atom({ plugin: 'clawd-panel', key: 'expanded' } as const, [])
-const showGrid = atom({ plugin: 'clawd-panel', key: 'showGrid' } as const, false)
+const showGrid = atom({ plugin: 'clawd-panel', key: 'showGrid' } as const, true)
 const band = atom({ plugin: 'clawd-panel', key: 'band' } as const, false)
 const now = atom({ plugin: 'clawd-panel', key: 'now' } as const, 0)
 const usage = atom({ plugin: 'clawd-panel', key: 'usage' } as const, null)
@@ -460,6 +462,46 @@ async function homeData($: EngineInterface, ctx: Ctx, s: SessionSnap): Promise<H
   return d
 }
 
+/** Flips one entry of the `expanded` set: a section, an agent row, a tree folder. */
+function toggler($: EngineInterface): (key: string) => void {
+  return key => {
+    void update($, expanded, list => (list.includes(key) ? list.filter(x => x !== key) : [...list, key]))
+  }
+}
+
+async function contextData($: EngineInterface, s: SessionSnap): Promise<ContextData> {
+  const d: ContextData = {
+    breakdown: await read($, breakdown),
+    showGrid: await read($, showGrid),
+    expanded: new Set(await read($, expanded)),
+    recounting: await read($, recounting),
+    compactions: s.compactions,
+    files: await read($, files),
+    tracked: await read($, tracked),
+    toggle: toggler($),
+    toggleGrid: () => {
+      void update($, showGrid, shown => !shown)
+    },
+    recount: () => {
+      void recount($)
+    },
+  }
+  if (s.cwd !== undefined) d.cwd = s.cwd
+  if (s.home !== undefined) d.home = s.home
+  return d
+}
+
+/** The Precise recount: a `full` breakdown, which sends token-count requests, once at a time. */
+async function recount($: EngineInterface): Promise<void> {
+  if (await read($, recounting)) return
+  await update($, recounting, () => true)
+  try {
+    await refreshUsage($, 'full')
+  } finally {
+    await update($, recounting, () => false)
+  }
+}
+
 export async function drawPane($: EngineInterface, e: RenderInput<'Pane'>): Promise<RenderElement> {
   const c = config()
   const { el, extra } = elementsOf($.ui.resolve(e), e.surface)
@@ -481,6 +523,9 @@ export async function drawPane($: EngineInterface, e: RenderInput<'Pane'>): Prom
   switch (active) {
     case 'home':
       body = home(ctx, await homeData($, ctx, s))
+      break
+    case 'context':
+      body = context(ctx, await contextData($, s))
       break
     default:
       body = placeholder(ctx, `${active} — not drawn yet`)

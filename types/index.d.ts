@@ -38,7 +38,13 @@ export type CategorySnap = {
 /** One /context grid square, reduced to what the grid draws. */
 export type GridSquare = { categoryName: string; isFilled: boolean; fullness: number }
 
-export type McpServerSnap = { name: string; tokens: number; tools: number; loaded: number }
+export type McpServerSnap = {
+  name: string
+  tokens: number
+  tools: number
+  loaded: number
+  items: { name: string; tokens: number; isLoaded: boolean }[]
+}
 
 /** `$.session.usage({ breakdown })`'s `context.breakdown`, reduced. */
 export type BreakdownSnap = {
