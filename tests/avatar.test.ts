@@ -3,7 +3,7 @@ import { expect, mock, test } from 'claude-code/testing'
 import { expandPath, fit, frameSize, sliceSheet } from '../src/collectors/avatar'
 import { unbase64 } from '../src/render/raster/cells'
 import { decodePng, PngError } from '../src/render/raster/png'
-import { sprite, STATES } from '../src/render/raster/sprite'
+import { frameAt, sprite, STATES } from '../src/render/raster/sprite'
 import { SPRITE } from '../src/theme'
 import { PALETTE_PNG, RGB_PNG, SHEET_PNG } from './fixtures'
 import { cmd, paneInput, state, stubBasics, stubSession, SURFACES, WITH_PEEK } from './kit'
@@ -124,4 +124,21 @@ test('the avatar animates with $.ui.blit while the pane is open; Preview cycles 
   await ui.press({ key: 'tab-home' })
   await clock.advance(1000)
   expect(blits.some(b => b.key === 'avatar-home')).toBe(true)
+})
+
+test('each state plays its own sequence: a blink every three seconds, the bulb once a second', () => {
+  const idle = Array.from({ length: 18 }, (_, t) => frameAt('idle', t))
+  expect(idle.filter(f => f === 2).length).toBe(1)
+  expect(Array.from({ length: 6 }, (_, t) => frameAt('thinking', t))).toEqual([0, 0, 0, 1, 1, 1])
+})
+
+test('an unchanged frame is not blitted again', WITH_PEEK, async ($, on) => {
+  const { clock, blits } = await session($, on, { TERM_PROGRAM: 'iTerm.app' })
+  await $.command.run(cmd('clawd', 'home'))
+  const ui = await $.ui.mount({ ...paneInput(), surface: 'terminal' })
+  await clock.advance(3000)
+  const home = blits.filter(b => b.key === 'avatar-home')
+  expect(home.length).toBeGreaterThan(0)
+  expect(home.length).toBeLessThan(6)
+  await ui.unmount()
 })

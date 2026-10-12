@@ -20,19 +20,20 @@ async function session($: any, on: any, overrides = {}) {
   return { clock, rec, fx }
 }
 
-async function turn($: any, fx: any, id: string, costUsd: number) {
+async function turn($: any, fx: any, id: string, costUsd: number, clock: any) {
   await $.turn.start({ text: 'go', turnId: id })
   const stream = $.turn.step({ turnId: id, index: 0, model: 'claude-opus-5-5', effort: 'high', messageCount: 1 })
   let step = await stream.next()
   while (step.done !== true) step = await stream.next()
   fx.costUsd = costUsd
   await $.turn.complete({ turnId: id, answer: 'ok', durationMs: 5, isAborted: false, reason: 'answer' })
+  await clock.settle()
 }
 
 test('Home draws identity, meters, Clawd, the radar and the sparkline on every surface', async ($, on) => {
-  const { fx } = await session($, on)
-  await turn($, fx, 't1', 4.95)
-  await turn($, fx, 't2', 5.36)
+  const { fx, clock } = await session($, on)
+  await turn($, fx, 't1', 4.95, clock)
+  await turn($, fx, 't2', 5.36, clock)
   for (const surface of SURFACES) {
     const ui = await $.ui.mount({ ...paneInput(), surface })
     expect(await ui.find({ type: 'Text', text: 'Opus 5.5' })).toBeDefined()

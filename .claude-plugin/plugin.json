@@ -1,6 +1,6 @@
 {
   "name": "clawd-panel",
-  "version": "0.6.0",
+  "version": "1.0.0",
   "description": "A right-side HUD pane for Claude Code: usage, context breakdown, subagents, git and a pixel-art avatar.",
   "author": {
     "name": "josefer09"

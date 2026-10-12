@@ -17,6 +17,9 @@ import { detectTerminal, parseTerminalWord, terminalWord } from './collectors/te
 import type { TerminalEnv } from './collectors/terminal'
 import { config, VERSION } from './config'
 import { bodyWidth, pane, placeholder } from './render/draw'
+import type { AlertBanner, Chrome } from './render/draw'
+import { band as bandTree } from './render/band'
+import type { BandData } from './render/band'
 import { isTab } from './render/pane'
 import { imageSourceOf, picture, rasterCells } from './render/avatar'
 import type { Drawn } from './render/avatar'
@@ -24,7 +27,7 @@ import { frameCount, framePixels, levelOf } from './render/avatarFrames'
 import { scale2, unbase64 } from './render/raster/cells'
 import type { Pixels } from './render/raster/cells'
 import { decodePng } from './render/raster/png'
-import { emptyStateSprite, FPS, FRAMES, mini, sprite, STATE_TEXT, STATES } from './render/raster/sprite'
+import { emptyStateSprite, FPS, frameAt, mini, sprite, STATE_TEXT, STATES } from './render/raster/sprite'
 import { agentsTab } from './render/tabs/agents'
 import { avatarTab } from './render/tabs/avatar'
 import type { AvatarData } from './render/tabs/avatar'
@@ -33,9 +36,9 @@ import { context } from './render/tabs/context'
 import { gitTab } from './render/tabs/git'
 import type { GitData } from './render/tabs/git'
 import type { ContextData } from './render/tabs/context'
-import { home } from './render/tabs/home'
+import { home, homeInline } from './render/tabs/home'
 import type { HomeData } from './render/tabs/home'
-import { elementsOf } from './render/ui'
+import { elementsOf, Line } from './render/ui'
 import type { Ctx } from './render/ui'
 import { DEFAULT_AVATAR, DEFAULT_SESSION, EMPTY_TOKENS, isAvatarConfig, PANE, STORE } from './state'
 import { paletteOf } from './theme'
@@ -258,7 +261,8 @@ async function loadAvatar($: EngineInterface): Promise<void> {
     return
   }
   const s = await read($, session)
-  const full = expandPath(path, s.home)
+  const given = expandPath(path, s.home)
+  const full = given.startsWith('/') || s.cwd === undefined ? given : `${s.cwd}/${given}`
   try {
     const file = await $.fs.read(full, { as: 'bytes' })
     const px = decodePng(unbase64(file.base64))
@@ -294,16 +298,20 @@ function stopAnimator(): void {
   animTimer?.cancel()
   animTimer = undefined
   animTargets = {}
+  lastBlit = {}
 }
 
+/** The last frame blitted to each key, so an unchanged frame is not sent again. */
+let lastBlit: Record<string, string> = {}
+
 async function animate($: EngineInterface): Promise<void> {
-  const keys = Object.keys(animTargets)
-  if (keys.length === 0) return
   animFrame += 1
   if (animFrame % (FPS * 5) === 0 && !(await $.ui.panes()).some(p => p.id === PANE)) {
     stopAnimator()
     return
   }
+  const keys = Object.keys(animTargets)
+  if (keys.length === 0) return
   const custom = await read($, avatarFrames)
   const state = await read($, avatarState)
   const isPreviewing = await read($, previewing)
@@ -311,26 +319,22 @@ async function animate($: EngineInterface): Promise<void> {
   for (const key of keys) {
     const drawn = animTargets[key]
     if (drawn === undefined) continue
-    let st = state
-    let frame = animFrame
-    if (key === 'avatar-preview' && isPreviewing) {
-      const per = FRAMES * 2
-      st = STATES[Math.floor(animFrame / per) % STATES.length] ?? state
-      frame = animFrame % per
-    }
+    const st = key === 'avatar-preview' && isPreviewing ? (STATES[Math.floor(animFrame / (FPS * 2)) % STATES.length] ?? state) : state
     const count = frameCount(custom, st)
-    if (count < 2 && !(key === 'avatar-preview' && isPreviewing)) continue
-    const f = ((frame % count) + count) % count
+    const f = custom ? animFrame % count : frameAt(st, animFrame)
     const cacheKey = `${key}:${drawn}:${st}:${f}:${custom?.source ?? 'clawd'}:${config().theme}`
+    if (lastBlit[key] === cacheKey) continue
     let made = frameCache.get(cacheKey)
     if (made === undefined) {
-      const px = framePixels(custom, st, f, pal)
+      const full = framePixels(custom, st, f, pal)
+      const px = key === 'avatar-mini' ? halfOf(full, custom !== null, pal.eye) : full
       made = drawn === 'image' ? { source: imageSourceOf(px) } : { cells: rasterCells(px).cells }
       if (frameCache.size > 64) frameCache.clear()
       frameCache.set(cacheKey, made)
     }
     const r = 'source' in made ? await $.ui.blit({ requestId: PANE, key, source: made.source }) : await $.ui.blit({ requestId: PANE, key, cells: made.cells })
     if (r.deny !== undefined) delete animTargets[key]
+    else lastBlit[key] = cacheKey
   }
 }
 
@@ -438,7 +442,9 @@ export const onTurnComplete: HookOf<'turn.complete'> = async ($, e, next) => {
     const at = await $.clock.now()
     const id = e.agentId
     await update($, agents, a => completed(a, id, at, e.isAborted))
-    await refreshAgents($)
+    $.clock.after(0, () => {
+      void refreshAgents($)
+    })
     return r
   }
   await update($, session, s => ({ ...s, isWorking: false }))
@@ -447,25 +453,47 @@ export const onTurnComplete: HookOf<'turn.complete'> = async ($, e, next) => {
   idleTimer = $.clock.after(4000, () => {
     void update($, avatarState, st => (st === 'done' ? 'idle' : st))
   })
+  // The reads outlive the turn's dispatch: the turn ends now, the HUD catches up.
+  $.clock.after(0, () => {
+    void afterTurn($)
+  })
+  return r
+}
+
+/** After a main-loop turn: usage and the breakdown, the turn's cost, the session, lifetime turns, agents, git. */
+async function afterTurn($: EngineInterface): Promise<void> {
   await refreshUsage($, 'summary')
   const u = await read($, usage)
   await update($, cost, ledger => recordCost(ledger, u?.costUsd))
   await refreshSession($)
-  const turns = await update($, lifetimeTurns, n => n + 1)
+  // Read the store right before writing: every session on the machine counts into it.
+  const saved = await stored($, STORE.lifetimeTurns)
+  const turns = (typeof saved === 'number' ? saved : await read($, lifetimeTurns)) + 1
   await persist($, STORE.lifetimeTurns, turns)
+  await update($, lifetimeTurns, () => turns)
   await refreshAgents($)
   refreshGitSoon($)
-  return r
 }
 
 // ---------------------------------------------------------------------------
 // Tools and subagents
 
+/** The main loop's tool calls still running: Clawd holds the tool pose until the last one ends. */
+let toolsInFlight = 0
+
 export const onToolCall: HookOf<'tool.call'> = async ($, e, next) => {
   const isMain = e.agentId === undefined
-  if (isMain) await update($, avatarState, () => 'tool')
-  const r = await next(e)
-  if (isMain) await update($, avatarState, st => (st === 'tool' ? 'thinking' : st))
+  if (isMain) {
+    toolsInFlight += 1
+    await update($, avatarState, () => 'tool')
+  }
+  let r: Awaited<ReturnType<typeof next>>
+  try {
+    r = await next(e)
+  } finally {
+    if (isMain) toolsInFlight = Math.max(0, toolsInFlight - 1)
+  }
+  if (isMain && toolsInFlight === 0) await update($, avatarState, st => (st === 'tool' ? 'thinking' : st))
   const file = fileOf(String(e.tool), e as unknown as Record<string, unknown>)
   if (file !== undefined && (FILE_TOOLS as readonly string[]).includes(String(e.tool)) && r.deny === undefined && r.isError !== true) {
     const agentId = e.agentId ?? ''
@@ -528,21 +556,27 @@ function drawnAs(mode: RenderMode, term: string, surface: RenderSurface): Drawn 
 }
 
 /** Clawd's picture for the current state, as `key`: the built-in sprite or the person's own frames. */
-async function avatarPicture($: EngineInterface, ctx: Ctx, key: string, override?: { state: AvatarState; frame: number }): Promise<RenderElement> {
+async function avatarPicture($: EngineInterface, ctx: Ctx, key: string, override?: { state: AvatarState; frame: number }, half = false): Promise<RenderElement> {
   const cfg = await read($, avatar)
   const term = await read($, terminal)
   const state = override?.state ?? (await read($, avatarState))
   const frame = override?.frame ?? 0
   const custom = await read($, avatarFrames)
-  const px = framePixels(custom, state, frame, ctx.pal.sprite)
+  const full = framePixels(custom, state, frame, ctx.pal.sprite)
+  const px = half ? halfOf(full, custom !== null, ctx.pal.sprite.eye) : full
   const drawn = drawnAs(cfg.mode, term, ctx.surface)
   if (ctx.surface === 'terminal') animTargets[key] = drawn
-  const isSingle = cfg.spritePath !== '' && cfg.sheetPath === '' && custom !== null
+  const isSingle = !half && cfg.spritePath !== '' && cfg.sheetPath === '' && custom !== null
   const source: ImageSource | undefined = isSingle && drawn === 'image' ? { file: custom.source, format: 'png' } : undefined
   return picture(ctx, key, px, drawn, `Clawd · ${STATE_TEXT[state]}`, source)
 }
 
-async function homeData($: EngineInterface, ctx: Ctx, s: SessionSnap): Promise<HomeData> {
+/** A frame at half size: the mockup's `mini()` for Clawd, a plain halving for a custom sprite. */
+function halfOf(px: Pixels, isCustom: boolean, eye: string): Pixels {
+  return isCustom ? halve(px) : mini(px, eye)
+}
+
+async function homeData($: EngineInterface, ctx: Ctx, s: SessionSnap, inline = false): Promise<HomeData> {
   const g = await read($, git)
   const d: HomeData = {
     turns: s.turns,
@@ -554,12 +588,13 @@ async function homeData($: EngineInterface, ctx: Ctx, s: SessionSnap): Promise<H
     avatarState: await read($, avatarState),
     level: levelOf(await read($, lifetimeTurns)),
     detail: (await read($, breakdown))?.detail ?? 'summary',
-    avatar: await avatarPicture($, ctx, 'avatar-home'),
+    avatar: inline ? Line(ctx, [], 'no-avatar') : await avatarPicture($, ctx, 'avatar-home'),
     refresh: () => {
       void refreshUsage($, 'summary')
       void refreshGit($)
     },
   }
+  if (inline) d.mini = await avatarPicture($, ctx, 'avatar-mini', undefined, true)
   if (g?.branch !== undefined) d.branch = g.branch
   if (g?.ahead !== undefined) d.ahead = g.ahead
   if (g?.behind !== undefined) d.behind = g.behind
@@ -717,7 +752,10 @@ export async function drawPane($: EngineInterface, e: RenderInput<'Pane'>): Prom
   }
   const active = await read($, tab)
   const s = await read($, session)
-  if (e.surface === 'terminal') animTargets = {}
+  if (e.surface === 'terminal') {
+    animTargets = {}
+    lastBlit = {}
+  }
   const selectTab = (id: TabId) => {
     void update($, tab, () => id)
     startAnimator($)
@@ -725,7 +763,7 @@ export async function drawPane($: EngineInterface, e: RenderInput<'Pane'>): Prom
   let body: RenderElement
   switch (active) {
     case 'home':
-      body = home(ctx, await homeData($, ctx, s))
+      body = e.props.placement === 'inline' ? homeInline(ctx, await homeData($, ctx, s, true)) : home(ctx, await homeData($, ctx, s))
       break
     case 'context':
       body = context(ctx, await contextData($, s))
@@ -742,5 +780,61 @@ export async function drawPane($: EngineInterface, e: RenderInput<'Pane'>): Prom
     default:
       body = placeholder(ctx, `${active} — not drawn yet`)
   }
-  return pane(ctx, { name: c.title, version: VERSION, isWorking: s.isWorking, tab: active, selectTab }, body)
+  const chrome: Chrome = { name: c.title, version: VERSION, isWorking: s.isWorking, tab: active, selectTab }
+  const banner = await alertBanner($)
+  if (banner !== undefined) chrome.alert = banner
+  return pane(ctx, chrome, body)
+}
+
+/** The context alert's banner while it stands and was not dismissed. */
+async function alertBanner($: EngineInterface): Promise<AlertBanner | undefined> {
+  const a = await read($, alert)
+  const u = await read($, usage)
+  if (!a.crossed || a.dismissed || u?.contextPercent === undefined) return undefined
+  const b = await read($, breakdown)
+  const banner: AlertBanner = {
+    percent: u.contextPercent,
+    window: u.contextWindow,
+    compact: () => {
+      void (async () => {
+        await update($, alert, x => ({ ...x, dismissed: true }))
+        try {
+          await $.session.compact()
+        } catch (error) {
+          debug($, 'compaction was not started', error)
+        }
+      })()
+    },
+    dismiss: () => {
+      void update($, alert, x => ({ ...x, dismissed: true }))
+    },
+  }
+  if (u.contextTokens !== undefined) banner.tokens = u.contextTokens
+  if (b?.isAutoCompactEnabled && b.autoCompactThreshold !== undefined && b.rawMaxTokens > 0) banner.autoCompactAt = (b.autoCompactThreshold / b.rawMaxTokens) * 100
+  return banner
+}
+
+/** The band above the prompt (board 2c), while /clawd-band has it on. */
+export async function drawBand($: EngineInterface, e: RenderInput<'AbovePrompt'>, next: (e: RenderInput<'AbovePrompt'>) => Promise<RenderElement>): Promise<RenderElement> {
+  if (e.props.hasSurvey || !(await read($, band))) return next(e)
+  const c = config()
+  const { el, extra } = elementsOf($.ui.resolve(e), e.surface)
+  const ctx: Ctx = { el, extra, site: 'band', surface: e.surface, width: Math.max(20, e.props.bodyColumns), pal: paletteOf(c.theme), now: 0 }
+  const s = await read($, session)
+  const g = await read($, git)
+  const d: BandData = {
+    usage: await read($, usage),
+    threshold: c.alertThreshold,
+    isWorking: s.isWorking || e.props.isWorking,
+    open: () => {
+      void (async () => {
+        await $.ui.open({ id: PANE, title: c.title, focus: true, closeOnEscape: true, columns: c.dockColumns })
+        startAnimator($)
+      })()
+    },
+  }
+  if (g?.branch !== undefined) d.branch = g.branch
+  if (s.model !== undefined) d.model = s.model
+  if (s.effort !== undefined) d.effort = s.effort
+  return bandTree(ctx, d)
 }

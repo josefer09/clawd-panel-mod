@@ -5,6 +5,7 @@ import type { Register } from 'claude-code'
 
 import { configure } from '../src/config'
 import {
+  drawBand,
   drawPane,
   onCommand,
   onCompact,
@@ -34,4 +35,5 @@ export const register: Register = (on, options) => {
   on('command.run', { command: ['clawd', 'clawd-band'] }, onCommand)
   on('ui.close', onPaneClose).catch(($, e, next) => next(e))
   on('ui.render', { component: 'Pane', requestId: 'clawd' }, drawPane)
+  on('ui.render', { component: 'AbovePrompt' }, drawBand)
 }

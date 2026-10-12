@@ -4,6 +4,33 @@ Every place the mod differs from the brief or from the mockup
 (`Claude HUD Mockup.dc.html`), why, and what it does instead. Grouped by
 screen; the first group covers the build itself.
 
+## Summary
+
+| Area | Deviation | Reason |
+| --- | --- | --- |
+| Build | No `/plugin-types`; `.claude/types/claude-code.d.ts` is the file 2.1.296 wrote | The command does not exist; the engine writes the types |
+| Build | All `$` calls, hooks and atoms live in `src/engine.tsx`; collectors and renderers are pure | The engine's scanner follows `$` and atoms only within one file and refuses an event hooked twice without a matcher |
+| Build | Render files are `.tsx` | They use JSX |
+| Chrome | Title and live mark on the first body row; rules without frame joints | The engine owns the pane's frame |
+| Chrome | Tab hotkeys `1:` drawn by the engine before the styled label | A plain Button draws its own hotkey |
+| Chrome | Panel surface not painted (except the band) | Sits on the terminal's background; `pyra-light` for light terminals |
+| Chrome | Footer ends the tree instead of pinning to the last row | A tree cannot measure its height |
+| Home | Radar labels not bold; Raster colors rounded | Raster cells carry no weight; 1,024 color pairs |
+| Home | `Lv.` = ⌊√ lifetime turns⌋ | The mockup gives it no data |
+| Context | Grid toggle, MCP servers open to tools, `⟲N` compaction mark, legend names may end in `…` | Additions within the brief |
+| Context | Outside-repo files under `(outside repo)/`; `untouched n/a` outside git | No tracked list there |
+| Agents | Context fill in tokens, no bar or % | A subagent's window is not exposed |
+| Agents | No USD per agent; row tokens = input + output | Only the session cost is exposed |
+| Agents | Worktree from the subagent's `cwd` only; first running agent open by default | What the API exposes |
+| Git | Git's own graph mapped to the mockup's glyphs; a merge's fork one row lower | `git log --graph` layout |
+| Avatar | `Image` only in kitty and Ghostty (not iTerm2, WezTerm, foot, tmux) | How Claude Code draws images |
+| Avatar | `Select` with `Auto` instead of radio rows; box label outside the border | The brief's Select; a border takes no title |
+| Avatar | Animation frames added (frame 0 is the mockup's) | The mockup has one picture per state |
+| 2a Alert | Toast plus an in-pane banner instead of a box over the transcript | A mod cannot draw over the transcript; toasts take no buttons |
+| 2b Narrow | Three-column Home when the pane sits above the prompt from 116 columns | Placement is the engine's |
+| 2c Band | `/clawd open HUD` (a button) instead of `ctrl+h` | A mod cannot bind its own key |
+| Engine | Redraws from `$.state` writes, not `$.ui.invalidate` | The documented reactive path |
+
 ## Build and architecture
 
 ### `/plugin-types` does not exist in this build
@@ -298,3 +325,66 @@ screen; the first group covers the build itself.
   `scripts/build-assets.ts` renders the ported sprites to
   `assets/clawd-sheet.png` (4 states × 4 frames) and `assets/clawd-<state>.png`,
   which also serve as a sheet example to load.
+
+## Variants (2a, 2b, 2c)
+
+### The alert lives in the pane and a toast, not over the transcript
+
+- **Mockup (2a)**: a red-framed box at the top right of the transcript with
+  `▲ Context at 91% — compaction soon ✕`, `182k / 200k · auto-compact at
+  95%`, and `[ /compact now ]  [ Dismiss ]`.
+- **Why not**: a mod cannot draw over the transcript; a toast takes text, not
+  buttons.
+- **Instead**: a `$.ui.toast` with the headline, once per crossing of the
+  threshold (`userConfig.alertThreshold`, 90 by default), and the same three
+  rows at the top of the pane on every tab: the headline in inverse red, the
+  facts (the auto-compact point when auto-compaction is on), and the two
+  buttons. `[ /compact now ]` calls `$.session.compact()`; `[ Dismiss ]` hides
+  the banner until the next crossing. The context meter, the radar's `CTX`
+  value and the band's `ctx` turn inverse red too, never red text alone.
+
+### The narrow layout is the pane above the prompt
+
+- **Mockup (2b)**: a 120×50 terminal, the panel above the prompt at about a
+  third of the height.
+- **How**: Claude Code places a pane above the prompt (`placement: 'inline'`)
+  in a terminal too narrow to dock it, or outside fullscreen. There, Home
+  draws the three columns of 2b from 116 body columns (usage with `↻` reset
+  times and a one-row cost sparkline; the r = 7 radar; Clawd at half size),
+  and the left column alone below that. The other tabs keep their one-column
+  layout. The height is the engine's (a third of the space, or what
+  `rows` asks); a taller tree scrolls inside it.
+
+### The band's shortcut
+
+- **Mockup (2c)**: `● live  ctrl+h open HUD`, and `ctrl+h toggle hud` under
+  the prompt.
+- **Why not**: a mod cannot bind a key of its own; a Button's `action` names
+  only Claude Code's keybinding actions.
+- **Instead**: `/clawd open HUD`, which is also a button: focus the band
+  (ctrl+x tab or a click) and press it. The band is turned on and off with
+  `/clawd-band` (kept in `$.store`).
+
+### The band sits on the panel surface
+
+- The band's spans are drawn on Dark `#2B2A29` (or `pyra-light`'s surface),
+  as the strip in 2c; its right end shows `● live` while a turn runs and
+  `○ idle` otherwise.
+
+## Engine behaviour
+
+### Redraws come from `$.state`, not `$.ui.invalidate`
+
+- **Brief**: use `$.ui.invalidate` to redraw.
+- **Instead**: every value a drawing reads is an atom in `$.state`; a write
+  redraws exactly the drawings that read it (and survives a hot reload),
+  which the docs recommend over a module variable plus `invalidate`. The
+  "Ns ago" stamps and running agents' times advance on a 10-second clock.
+
+### The footer is the last row of the tree
+
+- **Mockup**: the footer pinned to the panel's last row.
+- **Why not**: a tree cannot measure its own height; the body scrolls as a
+  whole when it is taller than `scroll.bodyRows`.
+- **Instead**: the footer ends the tree; on a tall tab it scrolls into view
+  at the end.

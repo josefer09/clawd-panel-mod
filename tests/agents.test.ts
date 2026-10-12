@@ -72,6 +72,7 @@ test('the accordion: totals, a nested child, details, more, files, and toggles',
   ]
   await clock.advance(252_000)
   await $.turn.complete({ turnId: 'p', answer: 'plan', durationMs: 1, isAborted: false, reason: 'answer', agentId: 'a3' })
+  await clock.settle()
   await $.command.run(cmd('clawd', 'agents'))
   for (const surface of SURFACES) {
     const ui = await $.ui.mount({ ...paneInput(), surface })

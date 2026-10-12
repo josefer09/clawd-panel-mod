@@ -11,9 +11,9 @@ import { pack } from '../raster/cells'
 import type { Cell } from '../raster/cells'
 import { radarCanvas, radarSvg } from '../raster/radar'
 import type { Axis } from '../raster/radar'
-import { sparkCells } from '../raster/sparkline'
+import { sparkCells, sparkLine } from '../raster/sparkline'
 import { STATE_TEXT } from '../raster/sprite'
-import { chip, Col, Line, pad, Row, spread, title, width } from '../ui'
+import { center, chip, Col, Line, pad, Row, spread, title } from '../ui'
 import type { Ctx, Span } from '../ui'
 
 export type HomeData = {
@@ -36,6 +36,8 @@ export type HomeData = {
   detail: string
   /** The avatar, drawn by the engine (Image or Raster), 24 wide and 14 tall. */
   avatar: RenderElement
+  /** The half-size avatar of the inline layout, 12 wide and 7 tall. */
+  mini?: RenderElement
   refresh: () => void
 }
 
@@ -248,3 +250,56 @@ export function home(ctx: Ctx, d: HomeData): RenderElement {
   )
 }
 
+
+/** The one-row cost sparkline of the inline layout: `cost`, the bars, `t1–tN`. */
+function costLine(ctx: Ctx, w: number, d: HomeData): RenderElement {
+  const p = ctx.pal
+  const turns = d.cost.turns
+  if (turns.length === 0) return Line(ctx, [{ t: 'cost', fg: p.D }, pad(5), { t: 'no turn has ended yet', fg: p.D, i: true }], 'cost-line')
+  const room = Math.max(4, w - 9 - 8)
+  const shown = turns.slice(-room)
+  const first = turns.length - shown.length + 1
+  const bars: Span[] = sparkLine(shown, p).map(c => ({ t: c.ch, ...(c.fg ? { fg: c.fg } : {}) }))
+  const span = `t${first}–t${turns.length}`
+  return Line(ctx, spread(w, [{ t: 'cost', fg: p.D }, pad(5), ...bars], [{ t: span, fg: p.D }]), 'cost-line')
+}
+
+/** The inline layout's left column: identity, compact meters, cost, one-row sparkline. */
+function inlineLeft(ctx: Ctx, w: number, d: HomeData): RenderElement[] {
+  return [...identity(ctx, w, d, false), Line(ctx, [], 'in-gap-1'), ...usageBlock(ctx, w, d, true), Line(ctx, [], 'in-gap-2'), costLine(ctx, w, d)]
+}
+
+/**
+ * Home above the prompt (board 2b): three columns across 116 cells, usage at
+ * the left, the stats radar (r = 7) in the middle, Clawd at half size at the
+ * right; narrower, the left column alone.
+ */
+export function homeInline(ctx: Ctx, d: HomeData): RenderElement {
+  const w = ctx.width
+  const p = ctx.pal
+  const { Box } = ctx.el
+  if (w < 116) return Col(ctx, inlineLeft(ctx, Math.min(w, 60), d), 'home')
+  const axes = radarAxes(d.usage, d.tokens, d.threshold)
+  const stats = [Line(ctx, title(ctx, 27, 'Stats'), 'stats-title'), radarBlock(ctx, 27, axes, 7, 5)]
+  const clawd = [
+    Line(ctx, title(ctx, 31, 'Clawd', `Lv. ${d.level}`, p.G), 'clawd-title'),
+    <Box key="mini-row" paddingLeft={9}>
+      {d.mini ?? d.avatar}
+    </Box>,
+    Line(ctx, [pad(10), { t: '▀'.repeat(10), fg: p.glow }], 'mini-glow'),
+    Line(ctx, center(31, [{ t: STATE_TEXT[d.avatarState], fg: p.E }]), 'mini-state'),
+  ]
+  return (
+    <Box key="home" flexDirection="row" width={w} columnGap={3}>
+      <Box flexDirection="column" width={52}>
+        {inlineLeft(ctx, 52, d)}
+      </Box>
+      <Box flexDirection="column" width={27}>
+        {stats}
+      </Box>
+      <Box flexDirection="column" width={31}>
+        {clawd}
+      </Box>
+    </Box>
+  )
+}
