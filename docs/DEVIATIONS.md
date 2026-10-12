@@ -159,3 +159,50 @@ screen; the first group covers the build itself.
   `(outside repo)/` by its file name. Outside a git repository there is no
   tracked list, so the tree holds only touched files and the title reads
   `untouched n/a`.
+
+## Agents (1c, 1d)
+
+### A subagent's context fill is absolute, with no bar or percent
+
+- **Mockup**: `ctx ▕████▏ 52.3k / 200k  26%`.
+- **Why not**: the API gives a subagent's requests' token counts, not its
+  context window. A percent would need a window the mod would have to guess.
+- **Instead**: `ctx 52.3k tokens`: input + cache read + cache write of its
+  last request, with `last request · N requests` under it.
+
+### No cost per subagent
+
+- **Mockup**: none shown, and the brief rules it out: only the session total
+  is exposed. Agent rows show tokens and time, never USD.
+
+### Row tokens are input plus output
+
+- **Mockup**: `38.2k` on a row whose details read `in 31.4k out 6.8k`.
+- **Instead**: the same rule: uncached input plus output, summed over the
+  agent's requests. Cache reads and writes are in the details. The header's
+  total adds the rows.
+
+### Branch and worktree come from the subagent's `cwd`
+
+- **Mockup**: `hud/reviewer  ▣ worktree`.
+- **How**: an agent spawned with its own `cwd` runs git there; a git dir under
+  `.git/worktrees/` marks a linked worktree. An agent without a `cwd` runs in
+  the session's directory and shows the session's branch. A worktree the
+  Agent tool creates on its own without passing a `cwd` is not detected.
+
+### Which row opens
+
+- **Mockup**: one expanded row.
+- **Instead**: the first running agent opens by default; pressing a row opens
+  or closes it, and the choice stands until the session resets.
+
+### Model names
+
+- The model is the one `agent.spawn` resolved (`claude-sonnet-5-5`), shown as
+  `Sonnet 5.5`; an id that does not follow that pattern is shown as given.
+
+### Empty state avatar
+
+- Drawn exactly as the mockup crops it (the idle sprite below its tenth pixel
+  row, doubled), in the avatar's render mode. With a custom sprite loaded,
+  its idle frame is drawn (doubled when it is 24×28 or smaller).
