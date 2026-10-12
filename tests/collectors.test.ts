@@ -84,8 +84,17 @@ test('the breakdown groups MCP tools by server and keeps the grid', () => {
     7,
   )
   expect(b.mcpServers).toEqual([
-    { name: 'github', tokens: 4200, tools: 2, loaded: 2 },
-    { name: 'linear', tokens: 0, tools: 1, loaded: 0 },
+    {
+      name: 'github',
+      tokens: 4200,
+      tools: 2,
+      loaded: 2,
+      items: [
+        { name: 'a', tokens: 3000, isLoaded: true },
+        { name: 'b', tokens: 1200, isLoaded: true },
+      ],
+    },
+    { name: 'linear', tokens: 0, tools: 1, loaded: 0, items: [{ name: 'a', tokens: 900, isLoaded: false }] },
   ])
   expect(b.grid[0]?.[0]).toEqual({ categoryName: 'Messages', isFilled: true, fullness: 1 })
   expect(tokensPerSquare(b)).toBe(200000)

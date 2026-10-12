@@ -12,8 +12,9 @@ export const GRID_COLUMNS = 100
 export function reduceBreakdown(b: SessionContextBreakdown, detail: 'summary' | 'full', at: number): BreakdownSnap {
   const servers = new Map<string, McpServerSnap>()
   for (const tool of b.mcpTools) {
-    const s = servers.get(tool.serverName) ?? { name: tool.serverName, tokens: 0, tools: 0, loaded: 0 }
+    const s = servers.get(tool.serverName) ?? { name: tool.serverName, tokens: 0, tools: 0, loaded: 0, items: [] }
     s.tools += 1
+    s.items.push({ name: tool.name.replace(`mcp__${tool.serverName}__`, ''), tokens: tool.tokens, isLoaded: tool.isLoaded })
     if (tool.isLoaded) {
       s.loaded += 1
       s.tokens += tool.tokens
@@ -32,7 +33,9 @@ export function reduceBreakdown(b: SessionContextBreakdown, detail: 'summary' | 
     rawMaxTokens: b.rawMaxTokens,
     percentage: b.percentage,
     grid,
-    mcpServers: [...servers.values()].sort((a, z) => z.tokens - a.tokens),
+    mcpServers: [...servers.values()]
+      .map(sv => ({ ...sv, items: sv.items.sort((a, z) => z.tokens - a.tokens) }))
+      .sort((a, z) => z.tokens - a.tokens),
     memoryFiles: b.memoryFiles.map(f => ({ path: f.path, type: f.type, tokens: f.tokens })),
     skills: b.skills
       ? {

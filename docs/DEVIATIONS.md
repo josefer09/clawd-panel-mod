@@ -115,3 +115,47 @@ screen; the first group covers the build itself.
 - `Raster` and `Image` are terminal-only. On the desktop app (and other
   remote surfaces) Clawd is an `Svg` of the same pixels, the radar an `Svg`,
   and the sparkline the same glyphs as text.
+
+## Context (1b)
+
+### Category colors follow the mockup by name
+
+- **Mockup**: the `CAT` table's colors per category.
+- **How**: the engine names each category (`System prompt`, `MCP tools`, ...)
+  and gives a theme key (`promptBorder`, `permission`, ...) meant for its own
+  theme. The HUD keeps the mockup's color for each name it knows, the free
+  space and buffer patterns by the category's `kind` (`free`, `buffer`), and
+  a fixed extra palette for any category the mockup does not name.
+
+### The grid can be hidden
+
+- **Brief**: "optional /context grid". The mockup shows it with no control.
+- **Instead**: shown by default, with a `[ Hide grid ]` / `[ Grid ]` button
+  beside **Precise recount**. Without it the legend spans the width.
+- A partly filled square draws `□` (as /context draws it hollow under 70%).
+
+### MCP servers open to their tools
+
+- **Mockup**: `▸ github` rows with no defined content.
+- **Instead**: pressing a server lists its tools and tokens; deferred tools
+  (outside the window) are marked and dim, and the server row says how many
+  are deferred.
+
+### Compaction marker
+
+- **Mockup**: none.
+- **Instead**: once the conversation was compacted, the title's note ends with
+  `· ⟲N` (N compactions this session).
+
+### Legend names may end in `…`
+
+- **Mockup**: `Autocompact buffer` runs into its token count at 52 columns.
+- **Instead**: the name is cut with `…` so the counts keep one space.
+
+### Files outside the repository and outside git
+
+- **Mockup**: one repository tree.
+- **Instead**: a file outside the repository root is listed under
+  `(outside repo)/` by its file name. Outside a git repository there is no
+  tracked list, so the tree holds only touched files and the title reads
+  `untouched n/a`.
